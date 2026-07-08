@@ -59,10 +59,14 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_editar = QtWidgets.QPushButton("Editar")
         btn_eliminar = QtWidgets.QPushButton("Eliminar")
         btn_refrescar = QtWidgets.QPushButton("Refrescar")
+        btn_plantilla = QtWidgets.QPushButton("Generar plantilla")
+        btn_importar = QtWidgets.QPushButton("Importar desde Excel")
         botones_layout.addWidget(btn_nuevo)
         botones_layout.addWidget(btn_editar)
         botones_layout.addWidget(btn_eliminar)
         botones_layout.addStretch()
+        botones_layout.addWidget(btn_plantilla)
+        botones_layout.addWidget(btn_importar)
         botones_layout.addWidget(btn_refrescar)
 
         self.tabla_empleados = QtWidgets.QTableWidget()
@@ -79,6 +83,8 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_editar.clicked.connect(self.editar_empleado)
         btn_eliminar.clicked.connect(self.eliminar_empleado)
         btn_refrescar.clicked.connect(self.cargar_empleados)
+        btn_plantilla.clicked.connect(self.generar_plantilla_empleados)
+        btn_importar.clicked.connect(self.importar_empleados_excel)
 
         return widget
 
@@ -152,6 +158,40 @@ class MainWindow(QtWidgets.QMainWindow):
                     "eliminarse (se perdería la trazabilidad). Si ya no trabaja en la empresa, "
                     "considera dejarlo registrado o crear un campo 'activo' en vez de borrarlo."
                 )
+
+    def generar_plantilla_empleados(self):
+        ruta, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Guardar plantilla de empleados", "plantilla_empleados.xlsx", "Excel (*.xlsx)"
+        )
+        if not ruta:
+            return
+        try:
+            EmployeeController.generar_plantilla(ruta)
+            QtWidgets.QMessageBox.information(
+                self, "Plantilla generada",
+                f"Plantilla guardada en:\n{ruta}\n\nLlenala con los datos de los empleados "
+                "(cedula, nombre, telefono, correo) y luego usa 'Importar desde Excel'."
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error", f"No se pudo generar la plantilla:\n{e}")
+
+    def importar_empleados_excel(self):
+        ruta, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Seleccionar plantilla de empleados", "", "Excel (*.xlsx *.xls)"
+        )
+        if not ruta:
+            return
+        try:
+            insertados, duplicados = EmployeeController.importar_masivo(ruta)
+            self.cargar_empleados()
+            QtWidgets.QMessageBox.information(
+                self, "Importacion completada",
+                f"Empleados importados: {insertados}\nDuplicados ignorados: {duplicados}"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error al importar", str(e))
+
+
 
     # -------------------- Tab Procesar Pagos --------------------
     def _crear_tab_pagos(self):

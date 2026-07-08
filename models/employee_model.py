@@ -62,3 +62,48 @@ class EmployeeModel:
             return dict(row) if row else None
         finally:
             conn.close()
+
+    @staticmethod
+    def get_by_nombre(nombre):
+        conn = get_connection()
+        try:
+            # Busqueda robusta insensible a mayusculas/minusculas y espacios en blanco residuales
+            row = conn.execute(
+                "SELECT * FROM empleados WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))",
+                (str(nombre).strip(),)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+
+    @staticmethod
+    def bulk_insert(registros):
+        """
+        Inserta un lote de empleados ignorando los que tengan cedula duplicada.
+        @param registros lista de dicts con claves: cedula, nombre, telefono, correo
+        @return tupla (insertados, duplicados)
+        """
+        conn = get_connection()
+        insertados = 0
+        duplicados = 0
+        try:
+            for r in registros:
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO empleados (cedula, nombre, telefono, correo) VALUES (?, ?, ?, ?)",
+                    (
+                        str(r.get("cedula", "")).strip(),
+                        str(r.get("nombre", "")).strip(),
+                        str(r.get("telefono", "")).strip(),
+                        str(r.get("correo", "")).strip()
+                    )
+                )
+                if cur.rowcount == 1:
+                    insertados += 1
+                else:
+                    duplicados += 1
+            conn.commit()
+            return insertados, duplicados
+        finally:
+            conn.close()
+
