@@ -13,11 +13,15 @@ ENCARGADOS_HEADER_ROW = 8  # indice 0-based → fila 9 de Excel
 # Mapa de columnas del Excel → nombre interno
 ENCARGADOS_COLUMN_MAP = {
     "nombre del encargado": "nombre_encargado",
+    "cedula": "cedula",
     "unidad administrativa": "unidad_administrativa",
     "monto a pagar": "monto_a_pagar",
     "monto del vale": "monto_vale",
     "comision": "comision",
-    "bonificacion": "bonificacion"
+    "bonificacion": "bonificacion",
+    "gastos": "gastos",
+    "ventas": "ventas",
+    "alquiler": "alquiler"
 }
 
 ENCARGADOS_SHEET = "Pago a encargados"
@@ -30,11 +34,10 @@ class ExcelReader:
     def read_encargados(cls, path):
         """
         Lee la hoja "Pago a encargados" del Excel de pagos y devuelve
-        una lista de diccionarios con las 6 columnas de interes.
-        Filtra las filas donde el nombre del encargado este vacio.
+        una lista de diccionarios con las columnas de interes.
+        Filtra las filas donde el nombre del encargado este vacio o sea un totalizador.
         @param path ruta absoluta al archivo .xlsx
-        @return lista de dicts con claves: nombre_encargado, unidad_administrativa,
-                monto_a_pagar, monto_vale, comision, bonificacion
+        @return lista de dicts con claves mapeadas segun ENCARGADOS_COLUMN_MAP
         """
         df = pd.read_excel(
             path,
@@ -44,18 +47,28 @@ class ExcelReader:
         )
         df.columns = [str(c).strip().lower() for c in df.columns]
 
-        columnas_requeridas = list(ENCARGADOS_COLUMN_MAP.keys())
-        faltantes = [c for c in columnas_requeridas if c not in df.columns]
-        if faltantes:
+        nombre_critico = "nombre del encargado"
+        if nombre_critico not in df.columns:
             raise ValueError(
-                f"La hoja '{ENCARGADOS_SHEET}' no contiene las columnas esperadas: "
-                f"{', '.join(faltantes)}. Columnas encontradas: {', '.join(df.columns)}"
+                f"La hoja '{ENCARGADOS_SHEET}' no contiene la columna obligatoria: '{nombre_critico}'. "
+                f"Columnas encontradas: {', '.join(df.columns)}"
             )
+
+        # Crear columnas mapeadas no encontradas para evitar errores si no estan presentes
+        columnas_requeridas = list(ENCARGADOS_COLUMN_MAP.keys())
+        for col in columnas_requeridas:
+            if col not in df.columns:
+                df[col] = ""
 
         df = df[columnas_requeridas].copy()
         df = df.rename(columns=ENCARGADOS_COLUMN_MAP)
         df = df.fillna("")
+        
+        # Filtrar nombres vacios
         df = df[df["nombre_encargado"].str.strip() != ""]
+        
+        # Omitir fila de totalizadores ("total general", "grand total", "total")
+        df = df[~df["nombre_encargado"].str.strip().str.lower().isin(["total general", "grand total", "total"])]
 
         filas = df.to_dict(orient="records")
 

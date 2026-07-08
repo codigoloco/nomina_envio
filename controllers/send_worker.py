@@ -42,14 +42,14 @@ class SendWorker(QtCore.QThread):
             nombre_encargado = str(fila.get("nombre_encargado", "")).strip()
             cedula = str(fila.get("cedula", "")).strip()
 
-            if nombre_encargado:
-                empleado = EmployeeModel.get_by_nombre(nombre_encargado)
-                id_para_log = nombre_encargado
-                tipo_id = "Nombre"
-            else:
+            if cedula:
                 empleado = EmployeeModel.get_by_cedula(cedula)
                 id_para_log = cedula
                 tipo_id = "Cédula"
+            else:
+                empleado = EmployeeModel.get_by_nombre(nombre_encargado)
+                id_para_log = nombre_encargado
+                tipo_id = "Nombre"
 
             datos_pago = {k: v for k, v in fila.items() if k not in ("cedula", "nombre_encargado")}
             periodo = fila.get("periodo", self.periodo_default)
