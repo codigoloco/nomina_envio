@@ -1,6 +1,14 @@
 .venv
 *.pyc
-__pycache__/*
+__pycache__/
 *.pdf
 *.xlsx
 *.db
+*.exe
+*.toc
+*.zip
+*.pyz
+
+dist/
+build/
+build/main
