@@ -10,5 +10,5 @@ __pycache__/
 *.pyz
 
 dist/
-build/
-build/main
+build/*
+main/*
