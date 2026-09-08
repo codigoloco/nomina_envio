@@ -10,16 +10,16 @@ from models.database import get_connection
 class EnvioModel:
 
     @staticmethod
-    def add_log(empleado_id, cedula, nombre, correo, periodo, monto, asunto, estado, detalle):
+    def add_log(empleado_id, cedula, nombre, correo, periodo, monto, asunto, estado, detalle, datos_json=None):
         conn = get_connection()
         try:
             conn.execute("""
                 INSERT INTO envios
-                    (empleado_id, cedula, nombre, correo, periodo, monto, asunto, fecha_envio, estado, detalle)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (empleado_id, cedula, nombre, correo, periodo, monto, asunto, fecha_envio, estado, detalle, datos_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 empleado_id, cedula, nombre, correo, periodo, str(monto), asunto,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), estado, detalle
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), estado, detalle, datos_json
             ))
             conn.commit()
         finally:

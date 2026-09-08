@@ -15,6 +15,8 @@ from controllers.send_worker import SendWorker
 
 from views.employee_dialog import EmployeeDialog
 from views.settings_dialog import SettingsDialog
+from views.google_drive_dialog import GoogleDriveDialog
+from views.loading_dialog import LoadingDialog
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -55,12 +57,16 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(widget)
 
         botones_layout = QtWidgets.QHBoxLayout()
+        self.chk_seleccionar_todo_emp = QtWidgets.QCheckBox("Seleccionar / Deseleccionar todo")
+        self.chk_seleccionar_todo_emp.setChecked(True)
         btn_nuevo = QtWidgets.QPushButton("Nuevo empleado")
         btn_editar = QtWidgets.QPushButton("Editar")
-        btn_eliminar = QtWidgets.QPushButton("Eliminar")
+        btn_eliminar = QtWidgets.QPushButton("Eliminar seleccionados")
         btn_refrescar = QtWidgets.QPushButton("Refrescar")
         btn_plantilla = QtWidgets.QPushButton("Generar plantilla")
         btn_importar = QtWidgets.QPushButton("Importar desde Excel")
+
+        botones_layout.addWidget(self.chk_seleccionar_todo_emp)
         botones_layout.addWidget(btn_nuevo)
         botones_layout.addWidget(btn_editar)
         botones_layout.addWidget(btn_eliminar)
@@ -70,15 +76,20 @@ class MainWindow(QtWidgets.QMainWindow):
         botones_layout.addWidget(btn_refrescar)
 
         self.tabla_empleados = QtWidgets.QTableWidget()
-        self.tabla_empleados.setColumnCount(4)
-        self.tabla_empleados.setHorizontalHeaderLabels(["Cédula", "Nombre", "Teléfono", "Correo"])
+        columnas = ["Seleccionar", "Cédula", "Nombre", "Teléfono", "Correo"]
+        self.tabla_empleados.setColumnCount(len(columnas))
+        self.tabla_empleados.setHorizontalHeaderLabels(columnas)
         self.tabla_empleados.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.tabla_empleados.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.tabla_empleados.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.tabla_empleados.horizontalHeader().setStretchLastSection(True)
+        self.tabla_empleados.horizontalHeader().setSectionsMovable(True)
+        self.tabla_empleados.horizontalHeader().setDragEnabled(True)
+        self.tabla_empleados.setSortingEnabled(True)
 
         layout.addLayout(botones_layout)
         layout.addWidget(self.tabla_empleados)
 
+        self.chk_seleccionar_todo_emp.stateChanged.connect(self._toggle_seleccionar_todo_empleados)
         btn_nuevo.clicked.connect(self.nuevo_empleado)
         btn_editar.clicked.connect(self.editar_empleado)
         btn_eliminar.clicked.connect(self.eliminar_empleado)
@@ -88,30 +99,50 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return widget
 
+    def _toggle_seleccionar_todo_empleados(self, state):
+        nuevo_estado = QtCore.Qt.Checked if state == QtCore.Qt.Checked else QtCore.Qt.Unchecked
+        self.tabla_empleados.blockSignals(True)
+        for i in range(self.tabla_empleados.rowCount()):
+            item = self.tabla_empleados.item(i, 0)
+            if item:
+                item.setCheckState(nuevo_estado)
+        self.tabla_empleados.blockSignals(False)
+
     def cargar_empleados(self):
+        self.tabla_empleados.setSortingEnabled(False)
         empleados = EmployeeController.listar_empleados()
         self.tabla_empleados.setRowCount(0)
+
+        estado_chk = QtCore.Qt.Checked if self.chk_seleccionar_todo_emp.isChecked() else QtCore.Qt.Unchecked
+
         for empleado in empleados:
             fila = self.tabla_empleados.rowCount()
             self.tabla_empleados.insertRow(fila)
-            self.tabla_empleados.setItem(fila, 0, QtWidgets.QTableWidgetItem(empleado["cedula"]))
-            self.tabla_empleados.setItem(fila, 1, QtWidgets.QTableWidgetItem(empleado["nombre"]))
-            self.tabla_empleados.setItem(fila, 2, QtWidgets.QTableWidgetItem(empleado["telefono"] or ""))
-            self.tabla_empleados.setItem(fila, 3, QtWidgets.QTableWidgetItem(empleado["correo"]))
-            self.tabla_empleados.item(fila, 0).setData(QtCore.Qt.UserRole, empleado["id"])
+
+            # Columna 0: Checkbox
+            item_chk = QtWidgets.QTableWidgetItem()
+            item_chk.setFlags(QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEnabled)
+            item_chk.setCheckState(estado_chk)
+            item_chk.setData(QtCore.Qt.UserRole, empleado)
+            self.tabla_empleados.setItem(fila, 0, item_chk)
+
+            # Columnas 1 a 4: Cédula, Nombre, Teléfono, Correo
+            self.tabla_empleados.setItem(fila, 1, QtWidgets.QTableWidgetItem(str(empleado["cedula"])))
+            self.tabla_empleados.setItem(fila, 2, QtWidgets.QTableWidgetItem(str(empleado["nombre"])))
+            self.tabla_empleados.setItem(fila, 3, QtWidgets.QTableWidgetItem(str(empleado["telefono"] or "")))
+            self.tabla_empleados.setItem(fila, 4, QtWidgets.QTableWidgetItem(str(empleado["correo"])))
+
+        self.tabla_empleados.resizeColumnsToContents()
+        self.tabla_empleados.setSortingEnabled(True)
 
     def _empleado_seleccionado(self):
         fila = self.tabla_empleados.currentRow()
         if fila < 0:
             return None
-        emp_id = self.tabla_empleados.item(fila, 0).data(QtCore.Qt.UserRole)
-        return {
-            "id": emp_id,
-            "cedula": self.tabla_empleados.item(fila, 0).text(),
-            "nombre": self.tabla_empleados.item(fila, 1).text(),
-            "telefono": self.tabla_empleados.item(fila, 2).text(),
-            "correo": self.tabla_empleados.item(fila, 3).text(),
-        }
+        item_chk = self.tabla_empleados.item(fila, 0)
+        if item_chk:
+            return item_chk.data(QtCore.Qt.UserRole)
+        return None
 
     def nuevo_empleado(self):
         dialogo = EmployeeDialog(self)
@@ -140,24 +171,51 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.critical(self, "Error", f"No se pudo actualizar el empleado:\n{e}")
 
     def eliminar_empleado(self):
-        seleccionado = self._empleado_seleccionado()
-        if not seleccionado:
-            QtWidgets.QMessageBox.information(self, "Selección requerida", "Seleccione un empleado de la tabla.")
+        # Recopilar todos los empleados marcados en la lista de verificación
+        seleccionados = []
+        for i in range(self.tabla_empleados.rowCount()):
+            item_chk = self.tabla_empleados.item(i, 0)
+            if item_chk and item_chk.checkState() == QtCore.Qt.Checked:
+                emp = item_chk.data(QtCore.Qt.UserRole)
+                if emp:
+                    seleccionados.append(emp)
+
+        if not seleccionados:
+            emp_cursor = self._empleado_seleccionado()
+            if emp_cursor:
+                seleccionados = [emp_cursor]
+
+        if not seleccionados:
+            QtWidgets.QMessageBox.information(
+                self, "Selección requerida",
+                "Debe marcar la casilla de verificación de al menos un empleado para eliminar."
+            )
             return
+
         respuesta = QtWidgets.QMessageBox.question(
-            self, "Confirmar eliminación", f"¿Eliminar al empleado {seleccionado['nombre']}?"
+            self, "Confirmar eliminación masiva",
+            f"¿Está seguro de eliminar {len(seleccionados)} empleado(s) seleccionado(s)?"
         )
-        if respuesta == QtWidgets.QMessageBox.Yes:
+        if respuesta != QtWidgets.QMessageBox.Yes:
+            return
+
+        eliminados = 0
+        omitidos = 0
+
+        for emp in seleccionados:
             try:
-                EmployeeController.eliminar_empleado(seleccionado["id"])
-                self.cargar_empleados()
+                EmployeeController.eliminar_empleado(emp["id"])
+                eliminados += 1
             except Exception:
-                QtWidgets.QMessageBox.warning(
-                    self, "No se puede eliminar",
-                    "Este empleado ya tiene envíos registrados en el historial y no puede "
-                    "eliminarse (se perdería la trazabilidad). Si ya no trabaja en la empresa, "
-                    "considera dejarlo registrado o crear un campo 'activo' en vez de borrarlo."
-                )
+                omitidos += 1
+
+        self.cargar_empleados()
+
+        msg = f"Eliminación completada.\nEmpleados eliminados exitosamente: {eliminados}"
+        if omitidos > 0:
+            msg += f"\nOmitidos (por tener envíos registrados en el historial): {omitidos}"
+
+        QtWidgets.QMessageBox.information(self, "Resultado de eliminación", msg)
 
     def generar_plantilla_empleados(self):
         ruta, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -200,8 +258,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         fila_superior = QtWidgets.QHBoxLayout()
         btn_cargar_excel = QtWidgets.QPushButton("Seleccionar archivo Excel...")
+        btn_cargar_drive = QtWidgets.QPushButton("Cargar desde Google Drive")
+        btn_config_drive = QtWidgets.QPushButton("Cambiar URL Drive...")
+        btn_limpiar = QtWidgets.QPushButton("Limpiar")
         self.label_archivo = QtWidgets.QLabel("Ningún archivo cargado")
         fila_superior.addWidget(btn_cargar_excel)
+        fila_superior.addWidget(btn_cargar_drive)
+        fila_superior.addWidget(btn_config_drive)
+        fila_superior.addWidget(btn_limpiar)
         fila_superior.addWidget(self.label_archivo)
         fila_superior.addStretch()
 
@@ -213,12 +277,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tabla_preview = QtWidgets.QTableWidget()
         self.tabla_preview.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.tabla_preview.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.tabla_preview.setSortingEnabled(True)
+        self.tabla_preview.horizontalHeader().setSectionsMovable(True)
+        self.tabla_preview.horizontalHeader().setDragEnabled(True)
 
         fila_botones = QtWidgets.QHBoxLayout()
+        self.chk_seleccionar_todo = QtWidgets.QCheckBox("Seleccionar / Deseleccionar todo")
+        self.chk_seleccionar_todo.setChecked(True)
+        self.chk_seleccionar_todo.setEnabled(False)
         self.btn_enviar = QtWidgets.QPushButton("Enviar correos")
         self.btn_enviar.setEnabled(False)
         self.btn_detener = QtWidgets.QPushButton("Detener")
         self.btn_detener.setEnabled(False)
+        fila_botones.addWidget(self.chk_seleccionar_todo)
         fila_botones.addWidget(self.btn_enviar)
         fila_botones.addWidget(self.btn_detener)
         fila_botones.addStretch()
@@ -235,11 +307,33 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.barra_progreso)
         layout.addWidget(self.texto_log, stretch=1)
 
+        self.tabla_preview.horizontalHeader().sectionMoved.connect(lambda *args: self._guardar_estado_columnas())
+
         btn_cargar_excel.clicked.connect(self.seleccionar_excel)
+        btn_cargar_drive.clicked.connect(self.cargar_desde_drive)
+        btn_config_drive.clicked.connect(self.cambiar_url_drive)
+        btn_limpiar.clicked.connect(self.limpiar_datos_pagos)
+        self.chk_seleccionar_todo.stateChanged.connect(self._toggle_seleccionar_todo)
         self.btn_enviar.clicked.connect(self.enviar_correos)
         self.btn_detener.clicked.connect(self.detener_envio)
 
         return widget
+
+    def limpiar_datos_pagos(self):
+        self.filas_pago_actual = []
+        self.label_archivo.setText("Ningún archivo cargado")
+        self.tabla_preview.setSortingEnabled(False)
+        self.tabla_preview.clear()
+        self.tabla_preview.setRowCount(0)
+        self.tabla_preview.setColumnCount(0)
+        self.btn_enviar.setEnabled(False)
+        self.btn_detener.setEnabled(False)
+        self.chk_seleccionar_todo.setEnabled(False)
+        self.chk_seleccionar_todo.blockSignals(True)
+        self.chk_seleccionar_todo.setChecked(True)
+        self.chk_seleccionar_todo.blockSignals(False)
+        self.barra_progreso.setValue(0)
+        self.texto_log.clear()
 
     def seleccionar_excel(self):
         ruta, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -247,34 +341,140 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not ruta:
             return
-        try:
-            filas = PaymentController.cargar_excel_pagos(ruta)
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Error al leer el Excel", str(e))
+
+        dialogo = LoadingDialog("excel", ruta, parent=self)
+        if dialogo.exec_() == QtWidgets.QDialog.Accepted and dialogo.resultado_filas is not None:
+            filas = dialogo.resultado_filas
+            self.filas_pago_actual = filas
+            self.label_archivo.setText(ruta.split("/")[-1])
+            self._mostrar_preview(filas)
+            self.btn_enviar.setEnabled(len(filas) > 0)
+        elif dialogo.error_mensaje:
+            QtWidgets.QMessageBox.critical(self, "Error al leer el Excel", dialogo.error_mensaje)
+
+    def cargar_desde_drive(self):
+        url_guardada = SettingsController.obtener_drive_url()
+        if not url_guardada:
+            dialogo = GoogleDriveDialog(self)
+            if dialogo.exec_() != QtWidgets.QDialog.Accepted:
+                return
+
+            url_o_id = dialogo.get_url_or_id()
+            if not url_o_id:
+                QtWidgets.QMessageBox.warning(
+                    self, "Campo vacío", "Debe ingresar una URL o ID de Google Sheets."
+                )
+                return
+
+            SettingsController.guardar_drive_url(url_o_id)
+            url_guardada = url_o_id
+
+        dialogo = LoadingDialog("drive", url_guardada, parent=self)
+        if dialogo.exec_() == QtWidgets.QDialog.Accepted and dialogo.resultado_filas is not None:
+            filas = dialogo.resultado_filas
+            self.filas_pago_actual = filas
+            self.label_archivo.setText("Google Sheets (Cargado)")
+            self._mostrar_preview(filas)
+            self.btn_enviar.setEnabled(len(filas) > 0)
+        elif dialogo.error_mensaje:
+            QtWidgets.QMessageBox.critical(
+                self, "Error al cargar Google Sheets", dialogo.error_mensaje
+            )
+
+    def cambiar_url_drive(self):
+        url_actual = SettingsController.obtener_drive_url()
+        dialogo = GoogleDriveDialog(self, url_inicial=url_actual)
+        if dialogo.exec_() != QtWidgets.QDialog.Accepted:
             return
 
-        self.filas_pago_actual = filas
-        self.label_archivo.setText(ruta.split("/")[-1])
-        self._mostrar_preview(filas)
-        self.btn_enviar.setEnabled(len(filas) > 0)
+        nueva_url = dialogo.get_url_or_id()
+        if not nueva_url:
+            QtWidgets.QMessageBox.warning(
+                self, "Campo vacío", "Debe ingresar una URL o ID de Google Sheets."
+            )
+            return
+
+        SettingsController.guardar_drive_url(nueva_url)
+        QtWidgets.QMessageBox.information(
+            self, "URL guardada", "La URL de Google Drive ha sido guardada encriptada de forma segura."
+        )
+
+        # Cargar automáticamente con la nueva URL
+        self.cargar_desde_drive()
+
+    def _toggle_seleccionar_todo(self, state):
+        nuevo_estado = QtCore.Qt.Checked if state == QtCore.Qt.Checked else QtCore.Qt.Unchecked
+        self.tabla_preview.blockSignals(True)
+        for i in range(self.tabla_preview.rowCount()):
+            item = self.tabla_preview.item(i, 0)
+            if item:
+                item.setCheckState(nuevo_estado)
+        self.tabla_preview.blockSignals(False)
+
+    def _guardar_estado_columnas(self):
+        state = self.tabla_preview.horizontalHeader().saveState()
+        settings = QtCore.QSettings("NominaApp", "TablaPreview")
+        settings.setValue("header_state", state)
+
+    def _restaurar_estado_columnas(self):
+        settings = QtCore.QSettings("NominaApp", "TablaPreview")
+        state = settings.value("header_state")
+        if state is not None:
+            self.tabla_preview.horizontalHeader().restoreState(state)
 
     def _mostrar_preview(self, filas):
+        self.tabla_preview.setSortingEnabled(False)
         self.tabla_preview.clear()
         if not filas:
             self.tabla_preview.setRowCount(0)
             self.tabla_preview.setColumnCount(0)
+            self.chk_seleccionar_todo.setEnabled(False)
             return
-        columnas = list(filas[0].keys())
-        self.tabla_preview.setColumnCount(len(columnas))
-        self.tabla_preview.setHorizontalHeaderLabels(columnas)
+
+        self.chk_seleccionar_todo.setEnabled(True)
+        self.chk_seleccionar_todo.blockSignals(True)
+        self.chk_seleccionar_todo.setChecked(True)
+        self.chk_seleccionar_todo.blockSignals(False)
+
+        columnas_datos = list(filas[0].keys())
+        encabezados_completos = ["Enviar"] + columnas_datos
+
+        self.tabla_preview.setColumnCount(len(encabezados_completos))
+        self.tabla_preview.setHorizontalHeaderLabels(encabezados_completos)
         self.tabla_preview.setRowCount(len(filas))
+
         for i, fila in enumerate(filas):
-            for j, col in enumerate(columnas):
-                self.tabla_preview.setItem(i, j, QtWidgets.QTableWidgetItem(str(fila.get(col, ""))))
+            # Columna 0: Checkbox de selección
+            item_chk = QtWidgets.QTableWidgetItem()
+            item_chk.setFlags(QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEnabled)
+            item_chk.setCheckState(QtCore.Qt.Checked)
+            item_chk.setData(QtCore.Qt.UserRole, fila)
+            self.tabla_preview.setItem(i, 0, item_chk)
+
+            # Columnas 1 en adelante: datos reales de la nómina
+            for j, col in enumerate(columnas_datos):
+                val_str = str(fila.get(col, ""))
+                self.tabla_preview.setItem(i, j + 1, QtWidgets.QTableWidgetItem(val_str))
+
         self.tabla_preview.resizeColumnsToContents()
+        self.tabla_preview.setSortingEnabled(True)
+        self._restaurar_estado_columnas()
 
     def enviar_correos(self):
-        if not self.filas_pago_actual:
+        # Filtrar únicamente las filas donde la casilla de verificación esté marcada (True)
+        filas_a_enviar = []
+        for i in range(self.tabla_preview.rowCount()):
+            item_chk = self.tabla_preview.item(i, 0)
+            if item_chk and item_chk.checkState() == QtCore.Qt.Checked:
+                fila_data = item_chk.data(QtCore.Qt.UserRole)
+                if fila_data:
+                    filas_a_enviar.append(fila_data)
+
+        if not filas_a_enviar:
+            QtWidgets.QMessageBox.warning(
+                self, "Sin destinatarios",
+                "Debe seleccionar al menos un registro (marcar el casilla de verificación) para realizar el envío."
+            )
             return
 
         smtp_config = SettingsController.get_smtp_config()
@@ -287,16 +487,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
         confirmacion = QtWidgets.QMessageBox.question(
             self, "Confirmar envío",
-            f"Se enviarán {len(self.filas_pago_actual)} correos. ¿Desea continuar?"
+            f"Se enviarán {len(filas_a_enviar)} correos a los destinatarios seleccionados. ¿Desea continuar?"
         )
         if confirmacion != QtWidgets.QMessageBox.Yes:
             return
 
         self.texto_log.clear()
         self.barra_progreso.setValue(0)
-        self.barra_progreso.setMaximum(len(self.filas_pago_actual))
+        self.barra_progreso.setMaximum(len(filas_a_enviar))
 
-        self.worker = SendWorker(self.filas_pago_actual, smtp_config, self.asunto_edit.text())
+        self.worker = SendWorker(filas_a_enviar, smtp_config, self.asunto_edit.text())
         self.worker.progreso.connect(self._actualizar_progreso)
         self.worker.log.connect(self.texto_log.appendPlainText)
         self.worker.terminado.connect(self._envio_terminado)
@@ -342,11 +542,19 @@ class MainWindow(QtWidgets.QMainWindow):
         filtros.addWidget(btn_refrescar_logs)
 
         self.tabla_logs = QtWidgets.QTableWidget()
-        columnas = ["Fecha", "Cédula", "Nombre", "Correo", "Periodo", "Monto", "Asunto", "Estado", "Detalle"]
+        columnas = [
+            "Fecha", "Estado", "Nombre", "Cédula", "Correo", "Tienda", "Mes",
+            "% Comisión", "Bonificación", "Comisión encargado", "Sueldo",
+            "TOTAL VENTA", "Gastos deducibles", "Neto (Ventas - Gastos)",
+            "Vales", "Pagos realizados", "Neto a pagar", "Asunto", "Detalle"
+        ]
         self.tabla_logs.setColumnCount(len(columnas))
         self.tabla_logs.setHorizontalHeaderLabels(columnas)
         self.tabla_logs.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.tabla_logs.horizontalHeader().setStretchLastSection(True)
+        self.tabla_logs.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.tabla_logs.horizontalHeader().setSectionsMovable(True)
+        self.tabla_logs.horizontalHeader().setDragEnabled(True)
+        self.tabla_logs.setSortingEnabled(True)
 
         layout.addLayout(filtros)
         layout.addWidget(self.tabla_logs)
@@ -357,6 +565,8 @@ class MainWindow(QtWidgets.QMainWindow):
         return widget
 
     def cargar_logs(self):
+        import json
+        self.tabla_logs.setSortingEnabled(False)
         estado = self.combo_estado.currentText() if hasattr(self, "combo_estado") else "Todos"
         texto = self.buscar_edit.text().strip() if hasattr(self, "buscar_edit") else ""
         logs = PaymentController.obtener_historial(estado_filtro=estado, texto_busqueda=texto)
@@ -365,13 +575,43 @@ class MainWindow(QtWidgets.QMainWindow):
         for log in logs:
             fila = self.tabla_logs.rowCount()
             self.tabla_logs.insertRow(fila)
+
+            # Intentar parsear el JSON completo de los datos enviados de la nómina
+            datos_pago = {}
+            if log.get("datos_json"):
+                try:
+                    datos_pago = json.loads(log["datos_json"])
+                except Exception:
+                    datos_pago = {}
+
             valores = [
-                log["fecha_envio"], log["cedula"], log["nombre"], log["correo"],
-                log["periodo"], log["monto"], log["asunto"], log["estado"], log["detalle"]
+                log.get("fecha_envio", ""),
+                log.get("estado", ""),
+                log.get("nombre", datos_pago.get("nombre", "")),
+                log.get("cedula", datos_pago.get("cedula", "")),
+                log.get("correo", ""),
+                datos_pago.get("unidad_administrativa", ""),
+                log.get("periodo", datos_pago.get("periodo", "")),
+                datos_pago.get("% Comision", ""),
+                datos_pago.get("Bonificacion", ""),
+                datos_pago.get("Comision encargado", ""),
+                datos_pago.get("Sueldo", ""),
+                datos_pago.get("TOTAL VENTA", ""),
+                datos_pago.get("Gastos deducibles", ""),
+                datos_pago.get("Neto (Ventas - Gastos)", ""),
+                datos_pago.get("Vales", ""),
+                datos_pago.get("Pagos realizados", ""),
+                log.get("monto", datos_pago.get("Neto a pagar", "")),
+                log.get("asunto", ""),
+                log.get("detalle", "")
             ]
+
             for j, valor in enumerate(valores):
                 item = QtWidgets.QTableWidgetItem(str(valor) if valor is not None else "")
-                if log["estado"] == "ERROR":
+                if log.get("estado") == "ERROR":
                     item.setForeground(QtCore.Qt.red)
                 self.tabla_logs.setItem(fila, j, item)
+
         self.tabla_logs.resizeColumnsToContents()
+        self.tabla_logs.setSortingEnabled(True)
+

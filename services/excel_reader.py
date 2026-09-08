@@ -1,149 +1,230 @@
 """
-Servicio: lectura de archivos Excel externos.
-Adapta fuentes externas (.xlsx) al formato que la aplicacion necesita.
-No modifica ningun archivo; solo lectura.
+Servicio: lectura de archivos Excel y Google Sheets (incluyendo Tablas Dinámicas y Múltiples Cuadros).
+Soporta la lectura unificada del Cuadro 1 (Trabajadores con cédula) y Cuadro 2 (Encargados especiales sin cédula -> 'N/A').
+Rango: A1:N(última fila con datos). No modifica ningún archivo; solo lectura.
 """
 
+import unicodedata
 import pandas as pd
 
-# Fila donde estan los encabezados reales en la hoja "Pago a encargados"
-ENCARGADOS_HEADER_ROW = 8  # indice 0-based → fila 9 de Excel
-
-
-# Mapa de columnas del Excel → nombre interno
+# Mapa de columnas exactas A1:N1 -> nombre interno estandarizado
 ENCARGADOS_COLUMN_MAP = {
-    "nombre del encargado": "nombre_encargado",
+    "encargado": "nombre",
+    "nombre_del_encargado": "nombre",
+    "nombre": "nombre",
     "cedula": "cedula",
-    "unidad administrativa": "unidad_administrativa",
-    "monto a pagar": "monto_a_pagar",
-    "monto del vale": "monto_vale",
-    "comision": "comision",
-    "bonificacion": "bonificacion",
-    "gastos": "gastos",
-    "ventas": "ventas",
-    "alquiler": "alquiler"
+    "tienda": "unidad_administrativa",
+    "unidad_administrativa": "unidad_administrativa",
+    "mes": "periodo",
+    "total_venta": "TOTAL VENTA",
+    "gastos_deducibles": "Gastos deducibles",
+    "neto_(ventas_-_gastos)": "Neto (Ventas - Gastos)",
+    "%_comision": "% Comision",
+    "comision": "% Comision",
+    "comision_encargado": "Comision encargado",
+    "sueldo": "Sueldo",
+    "bonificacion": "Bonificacion",
+    "vales": "Vales",
+    "pagos_realizados": "Pagos realizados",
+    "neto_a_pagar": "Neto a pagar"
 }
 
-ENCARGADOS_SHEET = "Pago a encargados"
-EMPLOYEES_REQUIRED_COLUMN = "cedula"
+NOMBRES_COLUMNAS_POSICIONALES = [
+    "nombre",                  # A: Encargado
+    "cedula",                  # B: Cédula
+    "unidad_administrativa",   # C: Tienda
+    "periodo",                 # D: Mes
+    "TOTAL VENTA",             # E: TOTAL VENTA
+    "Gastos deducibles",       # F: Gastos deducibles
+    "Neto (Ventas - Gastos)",  # G: Neto (Ventas - Gastos)
+    "% Comision",              # H: % Comisión
+    "Comision encargado",      # I: Comisión encargado
+    "Sueldo",                  # J: Sueldo
+    "Bonificacion",            # K: Bonificación
+    "Vales",                   # L: Vales
+    "Pagos realizados",        # M: Pagos realizados
+    "Neto a pagar"             # N: Neto a pagar
+]
+
+HOJA_PAGOS_ENCARGADOS = "Pagos a encargados"
+TOTALIZADORES_EXACTOS = {"suma_total", "total_general", "grand_total", "totales", "resultado_general", "suma_totales"}
+ALIAS_CEDULA = {"cedula", "ci", "c_i", "cedula_de_identidad", "nro_cedula", "numero_cedula", "documento"}
+
+
+def normalizar_columna(col) -> str:
+    """
+    Normaliza el nombre de una columna: convierte a minúsculas, elimina tildes/acentos,
+    recorta espacios y reemplaza espacios intermedios por guiones bajos.
+    """
+    texto = str(col).strip().lower()
+    texto = "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
+    texto = texto.replace(" ", "_")
+    return texto
+
+
+def limpiar_cedula(val) -> str:
+    """
+    Limpia el número de cédula eliminando puntos, guiones, prefijos o ceros flotantes.
+    Ej: "20.904.205" -> "20904205", "V-4181192.0" -> "4181192"
+    """
+    if not val or str(val).strip() in ("N/A", "nan", "None", ""):
+        return "N/A"
+    txt = str(val).strip()
+    if txt.endswith(".0"):
+        txt = txt[:-2]
+    digitos = "".join(c for c in txt if c.isdigit())
+    if digitos:
+        return digitos
+    res = txt.replace(".", "").replace(",", "").replace("-", "").replace(" ", "")
+    return res if res else "N/A"
+
+
+def es_totalizador(texto) -> bool:
+    """Retorna True si el texto es un totalizador de cierre final (ej: 'Suma total')."""
+    if not texto:
+        return False
+    norm = normalizar_columna(texto)
+    if norm in ("total_venta", "ventas", "neto_a_pagar", "total", "neto_(ventas_-_gastos)"):
+        return False
+    return norm in TOTALIZADORES_EXACTOS or norm.startswith("suma_total") or norm.startswith("total_general")
 
 
 class ExcelReader:
 
     @classmethod
-    def read_encargados(cls, path):
+    def read_payments_from_csv(cls, path_csv):
         """
-        Lee la hoja "Pago a encargados" del Excel de pagos y devuelve
-        una lista de diccionarios con las columnas de interes.
-        Filtra las filas donde el nombre del encargado este vacio o sea un totalizador.
-        @param path ruta absoluta al archivo .xlsx
-        @return lista de dicts con claves mapeadas segun ENCARGADOS_COLUMN_MAP
+        Lee todos los cuadros de 'Pagos a encargados' desde un archivo CSV.
+        Soporta Cuadro 1 (con cédula) y Cuadro 2 (sin cédula -> 'N/A').
+        Formatea campos faltantes como 'N/A'.
         """
-        df = pd.read_excel(
-            path,
-            sheet_name=ENCARGADOS_SHEET,
-            header=ENCARGADOS_HEADER_ROW,
-            dtype=str
-        )
-        df.columns = [str(c).strip().lower() for c in df.columns]
-
-        nombre_critico = "nombre del encargado"
-        if nombre_critico not in df.columns:
-            raise ValueError(
-                f"La hoja '{ENCARGADOS_SHEET}' no contiene la columna obligatoria: '{nombre_critico}'. "
-                f"Columnas encontradas: {', '.join(df.columns)}"
-            )
-
-        # Crear columnas mapeadas no encontradas para evitar errores si no estan presentes
-        columnas_requeridas = list(ENCARGADOS_COLUMN_MAP.keys())
-        for col in columnas_requeridas:
-            if col not in df.columns:
-                df[col] = ""
-
-        df = df[columnas_requeridas].copy()
-        df = df.rename(columns=ENCARGADOS_COLUMN_MAP)
+        df = pd.read_csv(path_csv, header=None, dtype=str)
         df = df.fillna("")
-        
-        # Filtrar nombres vacios
-        df = df[df["nombre_encargado"].str.strip() != ""]
-        
-        # Omitir fila de totalizadores ("total general", "grand total", "total")
-        df = df[~df["nombre_encargado"].str.strip().str.lower().isin(["total general", "grand total", "total"])]
-
-        filas = df.to_dict(orient="records")
 
         from controllers.settings_controller import SettingsController
-        for fila in filas:
-            for clave, valor in fila.items():
-                if clave not in ("nombre_encargado", "unidad_administrativa", "cedula", "nombre", "telefono", "correo", "periodo"):
-                    fila[clave] = SettingsController.format_amount(valor)
 
-        return filas
+        filas_resultado = []
+        mapa_columnas_actual = None
+        tiene_cedula_en_bloque = False
 
-    @classmethod
-    def read_employees_template(cls, path):
-        """
-        Lee una plantilla de empleados generada por la aplicacion y devuelve
-        una lista de diccionarios. Valida la presencia de la columna 'cedula'.
-        @param path ruta al archivo .xlsx de la plantilla
-        @return lista de dicts con claves: cedula, nombre, telefono, correo
-        """
-        df = pd.read_excel(path, dtype=str)
-        df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+        orden_prioritario = [
+            "nombre", "cedula", "periodo", "unidad_administrativa",
+            "% Comision", "Bonificacion", "Comision encargado", "Sueldo",
+            "TOTAL VENTA", "Gastos deducibles", "Neto (Ventas - Gastos)",
+            "Vales", "Pagos realizados", "Neto a pagar"
+        ]
 
-        if EMPLOYEES_REQUIRED_COLUMN not in df.columns:
-            raise ValueError(
-                f"La plantilla debe contener una columna llamada 'cedula'. "
-                f"Columnas encontradas: {', '.join(df.columns)}"
-            )
+        for idx, row_vals in df.iterrows():
+            vals = [str(v).strip() for v in row_vals.values]
+            if not any(vals):
+                continue
 
-        df = df.fillna("")
-        filas = df.to_dict(orient="records")
+            first_val = vals[0]
+            norm_first = normalizar_columna(first_val)
 
-        for fila in filas:
-            cedula = str(fila.get("cedula", "")).strip()
-            if cedula.endswith(".0"):
-                cedula = cedula[:-2]
-            fila["cedula"] = cedula
+            # Detectar fila de encabezados para un nuevo bloque/cuadro
+            if norm_first in ("encargado", "nombre", "nombre_del_encargado"):
+                mapa_columnas_actual = []
+                tiene_cedula_en_bloque = False
+                for c_i, c_val in enumerate(vals):
+                    c_norm = normalizar_columna(c_val)
+                    if c_norm in ENCARGADOS_COLUMN_MAP:
+                        col_mapped = ENCARGADOS_COLUMN_MAP[c_norm]
+                    elif "encargado" in c_norm or "nombre" in c_norm:
+                        col_mapped = "nombre"
+                    elif "cedula" in c_norm or "ci" in c_norm:
+                        col_mapped = "cedula"
+                    elif "tienda" in c_norm:
+                        col_mapped = "unidad_administrativa"
+                    elif c_norm in ("mes", "periodo"):
+                        col_mapped = "periodo"
+                    else:
+                        col_mapped = c_val
 
-        return [f for f in filas if f.get("cedula")]
+                    # Si el encabezado está vacío en columnas financieras, asignar el nombre posicional predeterminado
+                    if (not col_mapped or col_mapped.lower() in ("nan", "none", "")) and c_i < len(NOMBRES_COLUMNAS_POSICIONALES):
+                        col_mapped = NOMBRES_COLUMNAS_POSICIONALES[c_i]
+
+                    if col_mapped == "cedula":
+                        tiene_cedula_en_bloque = True
+                    mapa_columnas_actual.append(col_mapped)
+                continue
+
+            # Omitir filas de totales
+            if es_totalizador(first_val) or any(es_totalizador(v) for v in vals[:3]):
+                continue
+
+            # Procesar fila de datos si tenemos un bloque activo
+            if mapa_columnas_actual:
+                raw_dict = {}
+                for c_i, col_name in enumerate(mapa_columnas_actual):
+                    if c_i < len(vals):
+                        raw_dict[col_name] = vals[c_i]
+
+                nombre_val = str(raw_dict.get("nombre", "")).strip()
+                if not nombre_val or nombre_val.lower() in ("encargado", "nombre", "n/a") or es_totalizador(nombre_val):
+                    continue
+
+                # Tratar Cédula: si el bloque no tiene columna de cédula o está vacía, asignar "N/A"
+                if not tiene_cedula_en_bloque or not raw_dict.get("cedula"):
+                    raw_dict["cedula"] = "N/A"
+                else:
+                    raw_dict["cedula"] = limpiar_cedula(raw_dict["cedula"])
+
+                # Construir fila_ordenada en la secuencia estricta
+                fila_ordenada = {}
+                for col_key in orden_prioritario:
+                    val_raw = raw_dict.get(col_key, "").strip()
+                    if not val_raw:
+                        val_final = "N/A"
+                    elif col_key == "cedula":
+                        val_final = val_raw
+                    elif col_key in ("nombre", "unidad_administrativa", "periodo", "telefono", "correo"):
+                        val_final = val_raw if val_raw else "N/A"
+                    else:
+                        val_final = SettingsController.format_amount(val_raw) if val_raw != "N/A" else "N/A"
+
+                    fila_ordenada[col_key] = val_final
+
+                filas_resultado.append(fila_ordenada)
+
+        return filas_resultado
 
     @classmethod
     def read_payments(cls, path):
         """
-        Lee el Excel. Si tiene la hoja 'Pago a encargados' con su formato correspondiente,
-        la lee y mapea automaticamente. De lo contrario, lee la hoja activa buscando
-        la columna 'cedula'.
+        Método de lectura para archivos Excel/CSV locales.
         """
-        try:
-            # Intentar lectura especifica de la hoja de encargados
-            return cls.read_encargados(path)
-        except Exception:
-            # Caida en caso de usar un Excel tradicional con columna 'cedula'
-            df = pd.read_excel(path, dtype=str)
-            df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+        return cls.read_payments_from_csv(path)
 
-            if EMPLOYEES_REQUIRED_COLUMN not in df.columns:
-                raise ValueError(
-                    f"El archivo Excel debe contener una columna llamada 'cedula' o la hoja '{ENCARGADOS_SHEET}'. "
-                    f"Columnas encontradas: {', '.join(df.columns)}"
-                )
+    @classmethod
+    def read_employees_template(cls, path):
+        """
+        Lee una plantilla de empleados generada por la aplicación y devuelve
+        una lista de diccionarios. Valida la presencia de la columna 'cedula'.
+        """
+        df = pd.read_excel(path, header=0, dtype=str)
+        df.columns = [normalizar_columna(c) for c in df.columns]
 
-            df = df.fillna("")
-            filas = df.to_dict(orient="records")
+        cedula_col = None
+        for col in df.columns:
+            if col in ALIAS_CEDULA:
+                cedula_col = col
+                break
 
-            from controllers.settings_controller import SettingsController
-            for fila in filas:
-                cedula = str(fila.get(EMPLOYEES_REQUIRED_COLUMN, "")).strip()
-                if cedula.endswith(".0"):
-                    cedula = cedula[:-2]
-                fila[EMPLOYEES_REQUIRED_COLUMN] = cedula
+        if not cedula_col:
+            raise ValueError("La plantilla debe contener una columna llamada 'cedula'.")
 
-                # Formatear montos en columnas de datos adicionales
-                for clave, valor in fila.items():
-                    if clave not in (EMPLOYEES_REQUIRED_COLUMN, "nombre", "telefono", "correo", "periodo"):
-                        fila[clave] = SettingsController.format_amount(valor)
+        if cedula_col != "cedula":
+            df = df.rename(columns={cedula_col: "cedula"})
 
-            return filas
+        df = df.fillna("")
+        filas = df.to_dict(orient="records")
 
+        for fila in filas:
+            fila["cedula"] = limpiar_cedula(fila.get("cedula", ""))
 
+        return [f for f in filas if f.get("cedula") and f.get("cedula") != "N/A"]

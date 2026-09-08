@@ -44,8 +44,15 @@ def init_db():
             fecha_envio TEXT NOT NULL,
             estado TEXT NOT NULL,
             detalle TEXT,
+            datos_json TEXT,
             FOREIGN KEY (empleado_id) REFERENCES empleados(id)
         )
     """)
+    # Migración suave por si la tabla ya existía sin la columna datos_json
+    try:
+        cur.execute("ALTER TABLE envios ADD COLUMN datos_json TEXT")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()

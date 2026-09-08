@@ -6,6 +6,8 @@ no acceda directamente al mecanismo de persistencia.
 
 from PyQt5 import QtCore
 
+from services.encryption_service import EncryptionService
+
 _ORG = "MiEmpresa"
 _APP = "NominaApp"
 
@@ -33,6 +35,26 @@ class SettingsController:
         settings.setValue("smtp/password", password)
         settings.setValue("smtp/remitente", remitente_nombre)
         settings.setValue("smtp/use_tls", "true" if use_tls else "false")
+
+    @staticmethod
+    def obtener_drive_url() -> str:
+        """
+        Recupera la URL de Google Drive y la descifra.
+        @return URL en texto plano o cadena vacía si no existe.
+        """
+        settings = QtCore.QSettings(_ORG, _APP)
+        cifrada = settings.value("drive/url_enc", "")
+        return EncryptionService.desencriptar(cifrada)
+
+    @staticmethod
+    def guardar_drive_url(url: str):
+        """
+        Cifra la URL de Google Drive y la guarda en la configuración.
+        @param url URL en texto plano a guardar.
+        """
+        settings = QtCore.QSettings(_ORG, _APP)
+        cifrada = EncryptionService.encriptar(url.strip())
+        settings.setValue("drive/url_enc", cifrada)
 
     @staticmethod
     def get_currency_config():
@@ -64,18 +86,15 @@ class SettingsController:
         if not val_str_clean:
             return val_str_clean
 
-        # Normalizacion para parsear floats de Excel
+        # Normalizacion para parsear floats de Excel/Google Sheets
         cleaned = val_str_clean.replace("$", "").replace("Bs.", "").replace(" ", "")
 
-        if "," in cleaned and "." in cleaned:
-            if cleaned.find(".") < cleaned.find(","):
-                cleaned = cleaned.replace(".", "").replace(",", ".")
-            else:
-                cleaned = cleaned.replace(",", "")
-        elif "," in cleaned:
-            parts = cleaned.split(",")
-            if len(parts) == 2:
-                cleaned = cleaned.replace(",", ".")
+        if "," in cleaned:
+            # Si hay coma, eliminamos los puntos (miles) y cambiamos la coma por punto (decimal)
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            # Si no hay coma, cualquier punto representa miles y se elimina
+            cleaned = cleaned.replace(".", "")
 
         try:
             val_float = float(cleaned)

@@ -5,6 +5,7 @@ cumple el rol de un controlador: orquesta EmployeeModel, EmailService
 y EnvioModel según la lista de pagos leída del Excel.
 """
 
+import json
 from PyQt5 import QtCore
 
 from models.employee_model import EmployeeModel
@@ -39,10 +40,11 @@ class SendWorker(QtCore.QThread):
                 self.log.emit("Proceso detenido por el usuario.")
                 break
 
-            nombre_encargado = str(fila.get("nombre_encargado", "")).strip()
+            nombre_encargado = str(fila.get("nombre", fila.get("nombre_encargado", ""))).strip()
             cedula = str(fila.get("cedula", "")).strip()
+            datos_json = json.dumps(fila, ensure_ascii=False)
 
-            if cedula:
+            if cedula and cedula != "N/A":
                 empleado = EmployeeModel.get_by_cedula(cedula)
                 id_para_log = cedula
                 tipo_id = "Cédula"
@@ -51,9 +53,9 @@ class SendWorker(QtCore.QThread):
                 id_para_log = nombre_encargado
                 tipo_id = "Nombre"
 
-            datos_pago = {k: v for k, v in fila.items() if k not in ("cedula", "nombre_encargado")}
+            datos_pago = {k: v for k, v in fila.items() if k not in ("cedula", "nombre", "nombre_encargado")}
             periodo = fila.get("periodo", self.periodo_default)
-            monto = fila.get("monto_a_pagar", fila.get("monto", fila.get("neto_a_pagar", "")))
+            monto = fila.get("Neto a pagar", fila.get("monto_a_pagar", fila.get("monto", "")))
 
             if not empleado:
                 mensaje = f"No se encontró un empleado registrado con el {tipo_id.lower()} '{id_para_log}'"
@@ -67,7 +69,8 @@ class SendWorker(QtCore.QThread):
                     monto=monto,
                     asunto="",
                     estado="ERROR",
-                    detalle=mensaje
+                    detalle=mensaje,
+                    datos_json=datos_json
                 )
                 error_count += 1
                 self.progreso.emit(idx, total)
@@ -83,7 +86,9 @@ class SendWorker(QtCore.QThread):
             except Exception:
                 asunto = self.asunto_template
 
-            cuerpo_html = EmailService.build_payment_email_html(nombre_dest, datos_pago)
+            remitente_correo = self.smtp_config.get("user", "")
+            cuerpo_html = EmailService.build_payment_email_html(nombre_dest, datos_pago, remitente_correo=remitente_correo, periodo=periodo)
+
 
             try:
                 EmailService.send_email(self.smtp_config, correo_dest, asunto, cuerpo_html)
@@ -97,7 +102,8 @@ class SendWorker(QtCore.QThread):
                     monto=monto,
                     asunto=asunto,
                     estado="ENVIADO",
-                    detalle="OK"
+                    detalle="OK",
+                    datos_json=datos_json
                 )
                 ok_count += 1
             except EmailSendError as e:
@@ -111,7 +117,8 @@ class SendWorker(QtCore.QThread):
                     monto=monto,
                     asunto=asunto,
                     estado="ERROR",
-                    detalle=str(e)
+                    detalle=str(e),
+                    datos_json=datos_json
                 )
                 error_count += 1
 
