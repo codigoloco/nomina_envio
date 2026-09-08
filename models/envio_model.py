@@ -43,3 +43,48 @@ class EnvioModel:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+    @staticmethod
+    def get_latest_recipients():
+        """
+        Obtiene los destinatarios únicos del último lote de envíos registrado en la tabla 'envios'.
+        Un lote se define como los registros enviados dentro de una ventana de tiempo
+        cercana al último envío registrado (últimos 30 minutos desde el último envío).
+        Si no hay registros suficientes, toma los más recientes evitando duplicados.
+        """
+        conn = get_connection()
+        try:
+            row = conn.execute("SELECT MAX(fecha_envio) AS max_fecha FROM envios").fetchone()
+            if not row or not row["max_fecha"]:
+                return []
+            max_fecha_str = row["max_fecha"]
+
+            from datetime import datetime, timedelta
+            try:
+                max_dt = datetime.strptime(max_fecha_str, "%Y-%m-%d %H:%M:%S")
+                ventana_inicio = (max_dt - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+                rows = conn.execute("""
+                    SELECT empleado_id, cedula, nombre, correo, MAX(fecha_envio) as fecha_envio
+                    FROM envios
+                    WHERE fecha_envio >= ? AND correo IS NOT NULL AND TRIM(correo) != ''
+                    GROUP BY LOWER(TRIM(correo))
+                    ORDER BY id ASC
+                """, (ventana_inicio,)).fetchall()
+                if rows:
+                    return [dict(r) for r in rows]
+            except Exception:
+                pass
+
+            # Respaldo en caso de formato o ventana vacía
+            rows = conn.execute("""
+                SELECT empleado_id, cedula, nombre, correo, MAX(fecha_envio) as fecha_envio
+                FROM envios
+                WHERE correo IS NOT NULL AND TRIM(correo) != ''
+                GROUP BY LOWER(TRIM(correo))
+                ORDER BY id DESC
+                LIMIT 50
+            """).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+

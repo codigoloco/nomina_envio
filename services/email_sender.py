@@ -182,6 +182,29 @@ class EmailService:
         """
 
     @staticmethod
+    def build_custom_message_html(nombre, cuerpo_texto):
+        """
+        Construye el cuerpo HTML de un comunicado o mensaje masivo.
+        Preserva saltos de línea y formato limpio.
+        """
+        import html
+        cuerpo_escapado = html.escape(cuerpo_texto).replace("\n", "<br>")
+
+        return f"""
+        <html>
+        <body style="font-family:Arial, sans-serif; color:#333; line-height:1.6; padding:15px;">
+            <p><b>Salam</b> Estimado(a) <b>{html.escape(nombre)}</b>,</p>
+            <div style="margin:20px 0; font-size:14px; color:#333;">
+                {cuerpo_escapado}
+            </div>
+            <p style="margin-top:25px; font-size:12px; color:#555;">
+                <b>¡ÉXITOS Y BENDICIONES!</b>
+            </p>
+        </body>
+        </html>
+        """
+
+    @staticmethod
     def send_email(smtp_config, destinatario, asunto, cuerpo_html):
         """
         smtp_config: dict con host, port, user, password, use_tls (bool), remitente_nombre.

@@ -12,6 +12,8 @@ from controllers.employee_controller import EmployeeController
 from controllers.payment_controller import PaymentController
 from controllers.settings_controller import SettingsController
 from controllers.send_worker import SendWorker
+from controllers.mass_mail_controller import MassMailController
+from controllers.mass_send_worker import MassSendWorker
 
 from views.employee_dialog import EmployeeDialog
 from views.settings_dialog import SettingsDialog
@@ -26,12 +28,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1050, 680)
 
         self.filas_pago_actual = []
+        self.destinatarios_masivo_actual = []
         self.worker = None
+        self.worker_masivo = None
 
         self._crear_menu()
         self._crear_tabs()
 
         self.cargar_empleados()
+        self.cargar_ultimos_destinatarios_masivo()
         self.cargar_logs()
 
     # ==================== Menú ====================
@@ -49,7 +54,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(tabs)
         tabs.addTab(self._crear_tab_empleados(), "Empleados")
         tabs.addTab(self._crear_tab_pagos(), "Procesar Pagos")
+        tabs.addTab(self._crear_tab_mensajes_masivos(), "Mensajes Masivos")
         tabs.addTab(self._crear_tab_logs(), "Historial de Envíos")
+
 
     # -------------------- Tab Empleados --------------------
     def _crear_tab_empleados(self):
@@ -522,7 +529,236 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.cargar_logs()
 
+    # -------------------- Tab Mensajes Masivos --------------------
+    def _crear_tab_mensajes_masivos(self):
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+
+        # Fila superior de herramientas de destinatarios
+        fila_herramientas = QtWidgets.QHBoxLayout()
+        btn_cargar_ultimos = QtWidgets.QPushButton("Cargar últimos destinatarios")
+        btn_cargar_empleados = QtWidgets.QPushButton("Cargar desde lista de empleados")
+        self.buscar_masivo_edit = QtWidgets.QLineEdit()
+        self.buscar_masivo_edit.setPlaceholderText("Filtrar por cédula, nombre o correo...")
+        self.label_total_masivo = QtWidgets.QLabel("0 destinatarios")
+
+        fila_herramientas.addWidget(btn_cargar_ultimos)
+        fila_herramientas.addWidget(btn_cargar_empleados)
+        fila_herramientas.addWidget(self.buscar_masivo_edit)
+        fila_herramientas.addWidget(self.label_total_masivo)
+
+        # Fila Asunto y ayuda de variables
+        fila_asunto = QtWidgets.QHBoxLayout()
+        fila_asunto.addWidget(QtWidgets.QLabel("Asunto del correo:"))
+        self.asunto_masivo_edit = QtWidgets.QLineEdit("Comunicado importante - {nombre}")
+        self.asunto_masivo_edit.setToolTip("Variables disponibles: {nombre}, {cedula}, {correo}")
+        fila_asunto.addWidget(self.asunto_masivo_edit, stretch=2)
+        lbl_ayuda = QtWidgets.QLabel("Variables: <b>{nombre}</b>, <b>{cedula}</b>, <b>{correo}</b>")
+        fila_asunto.addWidget(lbl_ayuda)
+
+        # Campo Cuerpo del Mensaje
+        layout_cuerpo = QtWidgets.QVBoxLayout()
+        layout_cuerpo.addWidget(QtWidgets.QLabel("Cuerpo del mensaje (personalizable):"))
+        self.cuerpo_masivo_edit = QtWidgets.QPlainTextEdit()
+        self.cuerpo_masivo_edit.setMaximumHeight(130)
+        self.cuerpo_masivo_edit.setPlainText(
+            "Estimado(a) {nombre},\n\n"
+            "Por medio del presente correo le informamos lo siguiente:\n\n"
+            "[Escriba aquí el contenido del mensaje masivo]\n\n"
+            "Saludos cordiales."
+        )
+        layout_cuerpo.addWidget(self.cuerpo_masivo_edit)
+
+        # Tabla de destinatarios con checkbox
+        self.tabla_masivo = QtWidgets.QTableWidget()
+        columnas = ["Enviar", "Cédula", "Nombre", "Correo"]
+        self.tabla_masivo.setColumnCount(len(columnas))
+        self.tabla_masivo.setHorizontalHeaderLabels(columnas)
+        self.tabla_masivo.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.tabla_masivo.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.tabla_masivo.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.tabla_masivo.horizontalHeader().setSectionsMovable(True)
+        self.tabla_masivo.horizontalHeader().setDragEnabled(True)
+        self.tabla_masivo.setSortingEnabled(True)
+
+        # Fila de botones de envío
+        fila_acciones = QtWidgets.QHBoxLayout()
+        self.chk_seleccionar_todo_masivo = QtWidgets.QCheckBox("Seleccionar / Deseleccionar todo")
+        self.chk_seleccionar_todo_masivo.setChecked(True)
+        self.btn_enviar_masivo = QtWidgets.QPushButton("Enviar correos masivos")
+        self.btn_detener_masivo = QtWidgets.QPushButton("Detener")
+        self.btn_detener_masivo.setEnabled(False)
+
+        fila_acciones.addWidget(self.chk_seleccionar_todo_masivo)
+        fila_acciones.addWidget(self.btn_enviar_masivo)
+        fila_acciones.addWidget(self.btn_detener_masivo)
+        fila_acciones.addStretch()
+
+        # Barra de progreso y consola de log
+        self.barra_progreso_masivo = QtWidgets.QProgressBar()
+        self.texto_log_masivo = QtWidgets.QPlainTextEdit()
+        self.texto_log_masivo.setReadOnly(True)
+        self.texto_log_masivo.setMaximumBlockCount(2000)
+
+        # Agregar todo al layout principal
+        layout.addLayout(fila_herramientas)
+        layout.addLayout(fila_asunto)
+        layout.addLayout(layout_cuerpo)
+        layout.addWidget(self.tabla_masivo, stretch=2)
+        layout.addLayout(fila_acciones)
+        layout.addWidget(self.barra_progreso_masivo)
+        layout.addWidget(self.texto_log_masivo, stretch=1)
+
+        # Conexión de señales
+        btn_cargar_ultimos.clicked.connect(self.cargar_ultimos_destinatarios_masivo)
+        btn_cargar_empleados.clicked.connect(self.cargar_empleados_masivo)
+        self.buscar_masivo_edit.textChanged.connect(self._filtrar_destinatarios_masivo)
+        self.chk_seleccionar_todo_masivo.stateChanged.connect(self._toggle_seleccionar_todo_masivo)
+        self.btn_enviar_masivo.clicked.connect(self.enviar_correos_masivos)
+        self.btn_detener_masivo.clicked.connect(self.detener_envio_masivo)
+
+        return widget
+
+    def cargar_ultimos_destinatarios_masivo(self):
+        destinatarios = MassMailController.obtener_ultimos_destinatarios()
+        if not destinatarios:
+            destinatarios = MassMailController.obtener_todos_los_empleados()
+        self._mostrar_destinatarios_masivo(destinatarios, origen="Últimos remitentes/destinatarios")
+
+    def cargar_empleados_masivo(self):
+        empleados = MassMailController.obtener_todos_los_empleados()
+        self._mostrar_destinatarios_masivo(empleados, origen="Lista de empleados")
+
+    def _mostrar_destinatarios_masivo(self, lista, origen=""):
+        self.tabla_masivo.setSortingEnabled(False)
+        self.tabla_masivo.setRowCount(0)
+        self.destinatarios_masivo_actual = lista
+
+        estado_chk = QtCore.Qt.Checked if self.chk_seleccionar_todo_masivo.isChecked() else QtCore.Qt.Unchecked
+
+        for fila_idx, dest in enumerate(lista):
+            self.tabla_masivo.insertRow(fila_idx)
+
+            # Columna 0: Checkbox
+            item_chk = QtWidgets.QTableWidgetItem()
+            item_chk.setFlags(QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEnabled)
+            item_chk.setCheckState(estado_chk)
+            item_chk.setData(QtCore.Qt.UserRole, dest)
+            self.tabla_masivo.setItem(fila_idx, 0, item_chk)
+
+            # Columnas 1 a 3: Cédula, Nombre, Correo
+            self.tabla_masivo.setItem(fila_idx, 1, QtWidgets.QTableWidgetItem(str(dest.get("cedula", "") or "")))
+            self.tabla_masivo.setItem(fila_idx, 2, QtWidgets.QTableWidgetItem(str(dest.get("nombre", "") or "")))
+            self.tabla_masivo.setItem(fila_idx, 3, QtWidgets.QTableWidgetItem(str(dest.get("correo", "") or "")))
+
+        self.tabla_masivo.resizeColumnsToContents()
+        self.tabla_masivo.setSortingEnabled(True)
+
+        total = len(lista)
+        texto_origen = f" ({origen})" if origen else ""
+        self.label_total_masivo.setText(f"{total} destinatario(s){texto_origen}")
+        self._filtrar_destinatarios_masivo()
+
+    def _filtrar_destinatarios_masivo(self):
+        texto = self.buscar_masivo_edit.text().strip().lower()
+        for i in range(self.tabla_masivo.rowCount()):
+            if not texto:
+                self.tabla_masivo.setRowHidden(i, False)
+                continue
+
+            cedula = (self.tabla_masivo.item(i, 1).text() if self.tabla_masivo.item(i, 1) else "").lower()
+            nombre = (self.tabla_masivo.item(i, 2).text() if self.tabla_masivo.item(i, 2) else "").lower()
+            correo = (self.tabla_masivo.item(i, 3).text() if self.tabla_masivo.item(i, 3) else "").lower()
+
+            coincide = (texto in cedula) or (texto in nombre) or (texto in correo)
+            self.tabla_masivo.setRowHidden(i, not coincide)
+
+    def _toggle_seleccionar_todo_masivo(self, state):
+        nuevo_estado = QtCore.Qt.Checked if state == QtCore.Qt.Checked else QtCore.Qt.Unchecked
+        self.tabla_masivo.blockSignals(True)
+        for i in range(self.tabla_masivo.rowCount()):
+            if not self.tabla_masivo.isRowHidden(i):
+                item = self.tabla_masivo.item(i, 0)
+                if item:
+                    item.setCheckState(nuevo_estado)
+        self.tabla_masivo.blockSignals(False)
+
+    def enviar_correos_masivos(self):
+        filas_a_enviar = []
+        for i in range(self.tabla_masivo.rowCount()):
+            item_chk = self.tabla_masivo.item(i, 0)
+            if item_chk and item_chk.checkState() == QtCore.Qt.Checked:
+                dest_data = item_chk.data(QtCore.Qt.UserRole)
+                if dest_data:
+                    filas_a_enviar.append(dest_data)
+
+        if not filas_a_enviar:
+            QtWidgets.QMessageBox.warning(
+                self, "Sin destinatarios",
+                "Debe seleccionar al menos un destinatario (marcar su casilla de verificación) para realizar el envío."
+            )
+            return
+
+        asunto = self.asunto_masivo_edit.text().strip()
+        cuerpo = self.cuerpo_masivo_edit.toPlainText().strip()
+
+        if not asunto:
+            QtWidgets.QMessageBox.warning(self, "Asunto requerido", "Por favor ingrese el asunto del correo.")
+            self.asunto_masivo_edit.setFocus()
+            return
+
+        if not cuerpo:
+            QtWidgets.QMessageBox.warning(self, "Mensaje requerido", "Por favor ingrese el cuerpo del mensaje.")
+            self.cuerpo_masivo_edit.setFocus()
+            return
+
+        smtp_config = SettingsController.get_smtp_config()
+        if not smtp_config["host"] or not smtp_config["user"] or not smtp_config["password"]:
+            QtWidgets.QMessageBox.warning(
+                self, "Configuración requerida",
+                "Debe configurar el servidor SMTP en el menú Configuración antes de enviar correos."
+            )
+            return
+
+        confirmacion = QtWidgets.QMessageBox.question(
+            self, "Confirmar envío masivo",
+            f"Se enviarán {len(filas_a_enviar)} correos electrónicos personalizados a los destinatarios seleccionados.\n¿Desea continuar?"
+        )
+        if confirmacion != QtWidgets.QMessageBox.Yes:
+            return
+
+        self.texto_log_masivo.clear()
+        self.barra_progreso_masivo.setValue(0)
+        self.barra_progreso_masivo.setMaximum(len(filas_a_enviar))
+
+        self.worker_masivo = MassSendWorker(filas_a_enviar, smtp_config, asunto, cuerpo)
+        self.worker_masivo.progreso.connect(self._actualizar_progreso_masivo)
+        self.worker_masivo.log.connect(self.texto_log_masivo.appendPlainText)
+        self.worker_masivo.terminado.connect(self._envio_masivo_terminado)
+
+        self.btn_enviar_masivo.setEnabled(False)
+        self.btn_detener_masivo.setEnabled(True)
+        self.worker_masivo.start()
+
+    def detener_envio_masivo(self):
+        if self.worker_masivo:
+            self.worker_masivo.detener()
+            self.btn_detener_masivo.setEnabled(False)
+
+    def _actualizar_progreso_masivo(self, actual, total):
+        self.barra_progreso_masivo.setValue(actual)
+
+    def _envio_masivo_terminado(self, ok_count, error_count):
+        self.btn_enviar_masivo.setEnabled(True)
+        self.btn_detener_masivo.setEnabled(False)
+        QtWidgets.QMessageBox.information(
+            self, "Envío masivo finalizado",
+            f"Proceso de envío masivo completado.\nExitosos: {ok_count}\nCon error: {error_count}"
+        )
+        self.cargar_logs()
+
     # -------------------- Tab Historial de Envíos --------------------
+
     def _crear_tab_logs(self):
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(widget)
