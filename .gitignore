@@ -12,3 +12,6 @@ __pycache__/
 dist/
 build/*
 main/*
+main.spec
+build.bat
+build_exe.py
