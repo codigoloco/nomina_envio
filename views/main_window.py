@@ -268,11 +268,14 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_cargar_drive = QtWidgets.QPushButton("Cargar desde Google Drive")
         btn_config_drive = QtWidgets.QPushButton("Cambiar URL Drive...")
         btn_limpiar = QtWidgets.QPushButton("Limpiar")
+        self.btn_ajustar_columnas = QtWidgets.QPushButton("Ajustar columnas")
+        self.btn_ajustar_columnas.setEnabled(False)
         self.label_archivo = QtWidgets.QLabel("Ningún archivo cargado")
         fila_superior.addWidget(btn_cargar_excel)
         fila_superior.addWidget(btn_cargar_drive)
         fila_superior.addWidget(btn_config_drive)
         fila_superior.addWidget(btn_limpiar)
+        fila_superior.addWidget(self.btn_ajustar_columnas)
         fila_superior.addWidget(self.label_archivo)
         fila_superior.addStretch()
 
@@ -320,6 +323,7 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_cargar_drive.clicked.connect(self.cargar_desde_drive)
         btn_config_drive.clicked.connect(self.cambiar_url_drive)
         btn_limpiar.clicked.connect(self.limpiar_datos_pagos)
+        self.btn_ajustar_columnas.clicked.connect(self.ajustar_columnas_pagos)
         self.chk_seleccionar_todo.stateChanged.connect(self._toggle_seleccionar_todo)
         self.btn_enviar.clicked.connect(self.enviar_correos)
         self.btn_detener.clicked.connect(self.detener_envio)
@@ -333,6 +337,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabla_preview.clear()
         self.tabla_preview.setRowCount(0)
         self.tabla_preview.setColumnCount(0)
+        self.btn_ajustar_columnas.setEnabled(False)
         self.btn_enviar.setEnabled(False)
         self.btn_detener.setEnabled(False)
         self.chk_seleccionar_todo.setEnabled(False)
@@ -341,6 +346,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_seleccionar_todo.blockSignals(False)
         self.barra_progreso.setValue(0)
         self.texto_log.clear()
+
+    def ajustar_columnas_pagos(self):
+        if self.tabla_preview.columnCount() > 0:
+            self.tabla_preview.resizeColumnsToContents()
 
     def seleccionar_excel(self):
         ruta, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -436,9 +445,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tabla_preview.setRowCount(0)
             self.tabla_preview.setColumnCount(0)
             self.chk_seleccionar_todo.setEnabled(False)
+            self.btn_ajustar_columnas.setEnabled(False)
             return
 
         self.chk_seleccionar_todo.setEnabled(True)
+        self.btn_ajustar_columnas.setEnabled(True)
         self.chk_seleccionar_todo.blockSignals(True)
         self.chk_seleccionar_todo.setChecked(True)
         self.chk_seleccionar_todo.blockSignals(False)
@@ -463,9 +474,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 val_str = str(fila.get(col, ""))
                 self.tabla_preview.setItem(i, j + 1, QtWidgets.QTableWidgetItem(val_str))
 
+        self._restaurar_estado_columnas()
         self.tabla_preview.resizeColumnsToContents()
         self.tabla_preview.setSortingEnabled(True)
-        self._restaurar_estado_columnas()
 
     def enviar_correos(self):
         # Filtrar únicamente las filas donde la casilla de verificación esté marcada (True)

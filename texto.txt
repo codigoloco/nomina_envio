@@ -1,0 +1,29 @@
+         
+            # <div id="contenedor-botones-respuesta" style="border:1px solid #ddd; padding:16px; border-radius:8px; background:#f9f9f9; max-width:270px; margin-top:20px;">
+            #     <p style="margin-top:0; font-weight:bold; color:#333; font-size:15px;">Por favor seleccione su respuesta de pago:</p>
+                
+            #     <div style="margin-bottom:10px;">
+            #         <a href="{mailto_op1}" id="btn-opcion-transferencia" style="display:block; text-align:center; background:#007bff; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
+            #             ✔ Transferencia / Pago Móvil
+            #         </a>
+            #     </div>
+                
+            #     <div style="margin-bottom:10px;">
+            #         <a href="{mailto_op2}" id="btn-opcion-efectivo" style="display:block; text-align:center; background:#28a745; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
+            #             ✔ Efectivo en tienda
+            #         </a>
+            #     </div>
+
+            #     <div style="margin-bottom:10px;">
+            #         <a href="{mailto_op4}" id="btn-opcion-mixto" style="display:block; text-align:center; background:#6f42c1; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
+            #             ✔ Pago Mixto (Efectivo / Pago Móvil)
+            #         </a>
+            #     </div>
+                
+            #     <div>
+            #         <a href="{mailto_op3}" id="btn-opcion-ahorro" style="display:block; text-align:center; background:#E0A96D; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
+            #             ✔ Ahorro en caja
+            #         </a>
+            #     </div>
+            # </div>
+

@@ -17,3 +17,4 @@ build.bat
 build_exe.py
 __pycache__/
 *.py[cod]
+nomina.db

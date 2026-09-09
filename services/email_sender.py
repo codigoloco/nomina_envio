@@ -70,68 +70,52 @@ class EmailService:
                 f"</tr>"
             )
 
-        monto_str = str(datos_pago.get("Neto a pagar", datos_pago.get("Neto (Ventas - Gastos)", "N/A"))).strip()
-        destino_correo = remitente_correo if remitente_correo else "contacto@empresa.com"
-        
-        # Determinar el periodo a usar en el asunto
+        # Determinar el periodo a usar
         periodo_val = periodo if periodo else datos_pago.get("periodo", "")
         periodo_val = str(periodo_val).strip() if periodo_val else ""
 
-        if periodo_val and periodo_val != "N/A":
-            asunto_texto = f"Respuesta de Pago - {nombre} - {periodo_val}"
-        else:
-            asunto_texto = f"Respuesta de Pago - {nombre}"
+        # Extraer y formatear variables para la ficha estructurada de WhatsApp
+        tienda_val = datos_pago.get("unidad_administrativa", "N/A")
+        total_ventas_val = datos_pago.get("TOTAL VENTA", "N/A")
+        gastos_val = datos_pago.get("Gastos deducibles", "N/A")
+        neto_ventas_val = datos_pago.get("Neto (Ventas - Gastos)", "N/A")
+        vales_val = datos_pago.get("Vales", "N/A")
+        sueldo_val = datos_pago.get("Sueldo", "N/A")
+        bono_val = datos_pago.get("Bonificacion", "N/A")
+        comision_val = datos_pago.get("Comision encargado", "N/A")
 
-        asunto_encoded = urllib.parse.quote(asunto_texto)
+        pct_raw = str(datos_pago.get("% Comision", "N/A")).replace("$.", "").replace("$", "").replace(" ", "").strip()
+        pct_val = f"{pct_raw}%" if pct_raw and pct_raw != "N/A" else "N/A"
 
+        neto_cobrar_val = datos_pago.get("Neto a pagar", "N/A")
+        if neto_cobrar_val == "N/A":
+            neto_cobrar_val = neto_ventas_val
 
-        # Asegurar prefijo de formato $.  si viene solo el número
-        monto_formateado = monto_str
-        if monto_formateado != "N/A" and not monto_formateado.startswith("$."):
-            monto_formateado = f"$.  {monto_formateado}"
-
-        # 1. Opción 1: Transferencia / Pago Móvil
-        cuerpo_texto_op1 = (
-            f"OPCIÓN DE PAGO: Transferencia / Pago Móvil\n\n"
-            f"⚠️ POR FAVOR CORREGIR MONTOS ANTES DE ENVIAR EL CORREO ⚠️\n\n"
-            f"Monto a Cobrar pago móvil :{monto_formateado}\n\n"
-            f"Empleado: {nombre}\n\n"
-            f"Confirmación enviada por el trabajador."
+        mensaje_whatsapp = (
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+            "┃      REPORTE DE PAGO        ┃\n"
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n"
+            f"👤 *Empleado:* {nombre}\n"
+            f"🏬 *Tienda:* {tienda_val}\n"
+            f"📅 *Periodo:* {periodo_val if periodo_val else 'N/A'}\n"
+            "───────────────────────────────\n"
+            f"• *Total ventas:* {total_ventas_val}\n"
+            f"• *Gasto deducible:* {gastos_val}\n"
+            f"• *Neto venta - gastos:* {neto_ventas_val}\n"
+            f"• *Vales:* {vales_val}\n"
+            f"• *Sueldo:* {sueldo_val}\n"
+            f"• *Bonificación:* {bono_val}\n"
+            f"• *Comisión encargado:* {comision_val}\n"
+            f"• *Porcentaje comisión:* {pct_val}\n"
+            "───────────────────────────────\n"
+            f"🟢 *NETO A COBRAR:* {neto_cobrar_val}\n"
+            "───────────────────────────────\n"
+            "Confirmación enviada por el trabajador."
         )
 
-        # 2. Opción 2: Efectivo en tienda
-        cuerpo_texto_op2 = (
-            f"OPCIÓN DE PAGO: Efectivo en tienda\n\n"
-            f"⚠️ POR FAVOR CORREGIR MONTOS ANTES DE ENVIAR EL CORREO ⚠️\n\n"
-            f"Monto a Cobrar Efectivo: {monto_formateado}\n\n"
-            f"Empleado: {nombre}\n\n"
-            f"Confirmación enviada por el trabajador."
-        )
-
-        # 3. Opción 3: Ahorro en caja
-        cuerpo_texto_op3 = (
-            f"OPCIÓN DE PAGO: Ahorro en caja\n\n"
-            f"Monto guardado en caja (Ahorro): {monto_formateado}\n\n"
-            f"Empleado: {nombre}\n\n"
-            f"Confirmación enviada por el trabajador."
-        )
-
-        # 4. Opción 4 (NUEVO): Pago Mixto
-        cuerpo_texto_op4 = (
-            f"OPCIÓN DE PAGO:  Pago Móvil /Transferencia , o Efectivo $\n\n"
-            f"⚠️ POR FAVOR CORREGIR MONTOS ANTES DE ENVIAR EL CORREO ⚠️\n\n"
-            f"Monto a Cobrar  Efectivo   : {monto_formateado}\n"
-            f"Monto a Cobrar pago móvil :{monto_formateado}\n\n"
-            f"Empleado: {nombre}\n\n"
-            f"Confirmación enviada por el trabajador."
-        )
-
-
-        mailto_op1 = f"mailto:{destino_correo}?subject={asunto_encoded}&body={urllib.parse.quote(cuerpo_texto_op1)}"
-        mailto_op2 = f"mailto:{destino_correo}?subject={asunto_encoded}&body={urllib.parse.quote(cuerpo_texto_op2)}"
-        mailto_op3 = f"mailto:{destino_correo}?subject={asunto_encoded}&body={urllib.parse.quote(cuerpo_texto_op3)}"
-        mailto_op4 = f"mailto:{destino_correo}?subject={asunto_encoded}&body={urllib.parse.quote(cuerpo_texto_op4)}"
-
+        numero_whatsapp = "584228012307"
+        whatsapp_encoded = urllib.parse.quote(mensaje_whatsapp)
+        enlace_whatsapp = f"https://wa.me/{numero_whatsapp}?text={whatsapp_encoded}"
 
         return f"""
         <html>
@@ -143,36 +127,12 @@ class EmailService:
             <table style="border-collapse:collapse; margin-bottom:20px;">
                 {filas_html}
             </table>
-            
-            <div id="contenedor-botones-respuesta" style="border:1px solid #ddd; padding:16px; border-radius:8px; background:#f9f9f9; max-width:270px; margin-top:20px;">
-                <p style="margin-top:0; font-weight:bold; color:#333; font-size:15px;">Por favor seleccione su respuesta de pago:</p>
-                
-                <div style="margin-bottom:10px;">
-                    <a href="{mailto_op1}" id="btn-opcion-transferencia" style="display:block; text-align:center; background:#007bff; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
-                        ✔ Transferencia / Pago Móvil
-                    </a>
-                </div>
-                
-                <div style="margin-bottom:10px;">
-                    <a href="{mailto_op2}" id="btn-opcion-efectivo" style="display:block; text-align:center; background:#28a745; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
-                        ✔ Efectivo en tienda
-                    </a>
-                </div>
-
-                <div style="margin-bottom:10px;">
-                    <a href="{mailto_op4}" id="btn-opcion-mixto" style="display:block; text-align:center; background:#6f42c1; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
-                        ✔ Pago Mixto (Efectivo / Pago Móvil)
-                    </a>
-                </div>
-                
-                <div>
-                    <a href="{mailto_op3}" id="btn-opcion-ahorro" style="display:block; text-align:center; background:#E0A96D; color:#ffffff; text-decoration:none; padding:10px 8px; border-radius:5px; font-weight:bold; font-size:12px; white-space:nowrap;">
-                        ✔ Ahorro en caja
-                    </a>
-                </div>
+   
+            <div id="contenedor-boton-whatsapp" style="margin-top:20px; margin-bottom:20px;">
+                <a href="{enlace_whatsapp}" target="_blank" id="btn-confirmar-whatsapp" style="display:inline-block; background-color:#25D366; color:#ffffff; font-weight:bold; font-size:14px; text-decoration:none; padding:12px 22px; border-radius:6px; box-shadow:0 2px 4px rgba(0,0,0,0.15); font-family:Arial, sans-serif;">
+                    💬 Solicitar tu pago AQUI.
+                </a>
             </div>
-
-
 
             <p style="margin-top:20px;margin-left:75px;font-size:12px;">
                 <b>¡ÉXITOS Y BENDICIONES!</b>

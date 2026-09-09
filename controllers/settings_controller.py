@@ -92,9 +92,17 @@ class SettingsController:
         if "," in cleaned:
             # Si hay coma, eliminamos los puntos (miles) y cambiamos la coma por punto (decimal)
             cleaned = cleaned.replace(".", "").replace(",", ".")
-        else:
-            # Si no hay coma, cualquier punto representa miles y se elimina
+        elif cleaned.count(".") > 1:
+            # Multiples puntos representan separadores de miles
             cleaned = cleaned.replace(".", "")
+        elif cleaned.count(".") == 1:
+            partes = cleaned.split(".")
+            # Si antes del punto hay mas de 3 digitos (ej: 73777.92) o despues no hay exactamente 3 digitos (ej: 46.39 o 73777.9275), es decimal estandar
+            if len(partes[0]) > 3 or len(partes[1]) != 3:
+                pass
+            else:
+                # Caso de separador de miles con 3 digitos exactos (ej: 62.105 en CSV)
+                cleaned = cleaned.replace(".", "")
 
         try:
             val_float = float(cleaned)
