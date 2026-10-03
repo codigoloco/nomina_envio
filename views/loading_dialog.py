@@ -10,7 +10,7 @@ from controllers.loader_worker import DataLoaderWorker
 
 class LoadingDialog(QtWidgets.QDialog):
 
-    def __init__(self, tipo_fuente: str, fuente: str, parent=None):
+    def __init__(self, tipo_fuente: str, fuente: str, config_carga: dict = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Procesando datos")
         self.setFixedSize(420, 220)
@@ -23,7 +23,7 @@ class LoadingDialog(QtWidgets.QDialog):
         self._crear_ui()
 
         # Iniciar el hilo de carga en segundo plano
-        self.worker = DataLoaderWorker(tipo_fuente, fuente, parent=self)
+        self.worker = DataLoaderWorker(tipo_fuente, fuente, config_carga=config_carga, parent=self)
         self.worker.sig_progreso.connect(self._actualizar_progreso)
         self.worker.sig_exito.connect(self._on_exito)
         self.worker.sig_error.connect(self._on_error)

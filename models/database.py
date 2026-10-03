@@ -1,58 +1,36 @@
 """
-Conexión e inicialización de la base de datos SQLite.
-Esta es la única pieza que sabe cómo conectarse físicamente a la BD;
-los modelos (EmployeeModel, EnvioModel) la usan para ejecutar SQL.
+Punto único de acceso a la base de datos.
+Ya NO existe una base SQLite por defecto: la app trabaja con la conexión
+marcada como ACTIVA en Configuración > Conexiones de base de datos.
+Los modelos (EmployeeModel, EnvioModel, ...) siguen llamando a get_connection().
 """
 
-import sqlite3
 import os
 
-# nomina.db queda en la raíz del proyecto (un nivel arriba de /models)
+from models.conexion_bd import ConexionBD
+from models.conexion_config_model import ConexionConfigModel
+from models.drivers import obtener_driver
+
+# Ruta del antiguo nomina.db: solo se usa para importar datos locales hacia la base nueva.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "nomina.db")
+RUTA_DB_LEGADA = os.path.join(BASE_DIR, "nomina.db")
 
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+class SinConexionActivaError(Exception):
+    """No hay ninguna conexión de base de datos marcada como activa."""
 
 
-def init_db():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS empleados (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cedula TEXT UNIQUE NOT NULL,
-            nombre TEXT NOT NULL,
-            telefono TEXT,
-            correo TEXT NOT NULL
+def abrir_conexion(config: dict) -> ConexionBD:
+    """Abre una conexión con la configuración indicada (sea o no la activa)."""
+    driver = obtener_driver(config["motor"])
+    return ConexionBD(driver.abrir(config), driver)
+
+
+def get_connection() -> ConexionBD:
+    """Abre una conexión a la base de datos ACTIVA."""
+    config = ConexionConfigModel.obtener_activa()
+    if not config:
+        raise SinConexionActivaError(
+            "No hay una base de datos activa. Configure una en Configuración > Conexiones de base de datos."
         )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS envios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            empleado_id INTEGER,
-            cedula TEXT,
-            nombre TEXT,
-            correo TEXT,
-            periodo TEXT,
-            monto TEXT,
-            asunto TEXT,
-            fecha_envio TEXT NOT NULL,
-            estado TEXT NOT NULL,
-            detalle TEXT,
-            datos_json TEXT,
-            FOREIGN KEY (empleado_id) REFERENCES empleados(id)
-        )
-    """)
-    # Migración suave por si la tabla ya existía sin la columna datos_json
-    try:
-        cur.execute("ALTER TABLE envios ADD COLUMN datos_json TEXT")
-    except Exception:
-        pass
-
-    conn.commit()
-    conn.close()
+    return abrir_conexion(config)

@@ -16,14 +16,16 @@ class DataLoaderWorker(QtCore.QThread):
     sig_exito = QtCore.pyqtSignal(list)
     sig_error = QtCore.pyqtSignal(str)
 
-    def __init__(self, tipo_fuente: str, fuente: str, parent=None):
+    def __init__(self, tipo_fuente: str, fuente: str, config_carga: dict = None, parent=None):
         """
         @param tipo_fuente: 'drive' o 'excel'
         @param fuente: URL/ID de Google Sheets o ruta absoluta del archivo .xlsx
+        @param config_carga: dict opcional con 'hoja', 'columnas' y 'mes'
         """
         super().__init__(parent)
         self.tipo_fuente = tipo_fuente
         self.fuente = fuente
+        self.config_carga = config_carga
 
     def run(self):
         try:
@@ -38,8 +40,8 @@ class DataLoaderWorker(QtCore.QThread):
                 self.sig_progreso.emit(25, "Abriendo archivo Excel local...")
                 time.sleep(0.2)
 
-                self.sig_progreso.emit(50, "Extrayendo matriz de datos A2:N...")
-                filas = PaymentController.cargar_excel_pagos(self.fuente)
+                self.sig_progreso.emit(50, "Extrayendo matriz de datos...")
+                filas = PaymentController.cargar_excel_pagos(self.fuente, config_carga=self.config_carga)
 
             self.sig_progreso.emit(85, "Filtrando totalizadores y organizando columnas...")
             time.sleep(0.2)

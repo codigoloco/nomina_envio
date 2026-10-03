@@ -2,3 +2,6 @@ PyQt5>=5.15
 pandas>=2.0
 openpyxl>=3.1
 pyinstaller>=6.0
+pymysql>=1.1.0
+psycopg2-binary>=2.9.9
+pyodbc>=5.1.0

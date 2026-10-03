@@ -13,9 +13,14 @@ from models.envio_model import EnvioModel
 class PaymentController:
 
     @staticmethod
-    def cargar_excel_pagos(path):
+    def inspeccionar_excel(path):
+        """Inspecciona hojas visibles, columnas y meses disponibles en el Excel."""
+        return ExcelReader.inspeccionar_estructura(path)
+
+    @staticmethod
+    def cargar_excel_pagos(path, config_carga=None):
         """Devuelve la lista de filas (dict) leidas del Excel de pagos."""
-        return ExcelReader.read_payments(path)
+        return ExcelReader.read_payments(path, config_carga=config_carga)
 
     @staticmethod
     def cargar_drive_pagos(url_o_id):

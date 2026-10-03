@@ -12,10 +12,13 @@ from controllers.employee_controller import EmployeeController
 from controllers.payment_controller import PaymentController
 from controllers.settings_controller import SettingsController
 from controllers.send_worker import SendWorker
+from controllers.conexion_controller import ConexionController
 from controllers.mass_mail_controller import MassMailController
 from controllers.mass_send_worker import MassSendWorker
 
+from views.database_dialog import DatabaseDialog
 from views.employee_dialog import EmployeeDialog
+from views.excel_config_dialog import ExcelConfigDialog
 from views.settings_dialog import SettingsDialog
 from views.google_drive_dialog import GoogleDriveDialog
 from views.loading_dialog import LoadingDialog
@@ -35,15 +38,40 @@ class MainWindow(QtWidgets.QMainWindow):
         self._crear_menu()
         self._crear_tabs()
 
-        self.cargar_empleados()
-        self.cargar_ultimos_destinatarios_masivo()
-        self.cargar_logs()
+        # Validar si existe una base de datos activa lista
+        ok_bd, msg_bd = ConexionController.estado_inicial()
+        if not ok_bd:
+            self.abrir_conexiones_bd(msg_bd)
+        else:
+            self.refrescar_todo()
 
     # ==================== Menú ====================
     def _crear_menu(self):
         menu = self.menuBar().addMenu("Configuración")
+        accion_db = menu.addAction("Conexiones de base de datos...")
+        accion_db.triggered.connect(lambda: self.abrir_conexiones_bd())
+        menu.addSeparator()
         accion_smtp = menu.addAction("Configurar correo SMTP")
         accion_smtp.triggered.connect(self.abrir_configuracion_smtp)
+
+    def abrir_conexiones_bd(self, mensaje_inicial: str = ""):
+        dialogo = DatabaseDialog(self, mensaje_inicial=mensaje_inicial)
+        dialogo.exec_()
+        self.refrescar_todo()
+
+    def refrescar_todo(self):
+        try:
+            self.cargar_empleados()
+        except Exception:
+            pass
+        try:
+            self.cargar_ultimos_destinatarios_masivo()
+        except Exception:
+            pass
+        try:
+            self.cargar_logs()
+        except Exception:
+            pass
 
     def abrir_configuracion_smtp(self):
         SettingsDialog(self).exec_()
@@ -298,10 +326,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_seleccionar_todo.setEnabled(False)
         self.btn_enviar = QtWidgets.QPushButton("Enviar correos")
         self.btn_enviar.setEnabled(False)
+        self.btn_enviar_prueba = QtWidgets.QPushButton("Enviar prueba")
+        self.btn_enviar_prueba.setEnabled(False)
         self.btn_detener = QtWidgets.QPushButton("Detener")
         self.btn_detener.setEnabled(False)
         fila_botones.addWidget(self.chk_seleccionar_todo)
         fila_botones.addWidget(self.btn_enviar)
+        fila_botones.addWidget(self.btn_enviar_prueba)
         fila_botones.addWidget(self.btn_detener)
         fila_botones.addStretch()
 
@@ -326,6 +357,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_ajustar_columnas.clicked.connect(self.ajustar_columnas_pagos)
         self.chk_seleccionar_todo.stateChanged.connect(self._toggle_seleccionar_todo)
         self.btn_enviar.clicked.connect(self.enviar_correos)
+        self.btn_enviar_prueba.clicked.connect(self.enviar_correo_prueba)
         self.btn_detener.clicked.connect(self.detener_envio)
 
         return widget
@@ -339,6 +371,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabla_preview.setColumnCount(0)
         self.btn_ajustar_columnas.setEnabled(False)
         self.btn_enviar.setEnabled(False)
+        self.btn_enviar_prueba.setEnabled(False)
         self.btn_detener.setEnabled(False)
         self.chk_seleccionar_todo.setEnabled(False)
         self.chk_seleccionar_todo.blockSignals(True)
@@ -358,13 +391,42 @@ class MainWindow(QtWidgets.QMainWindow):
         if not ruta:
             return
 
-        dialogo = LoadingDialog("excel", ruta, parent=self)
+        # Inspeccionar hojas visibles, columnas y meses disponibles
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            estructura = PaymentController.inspeccionar_excel(ruta)
+        except Exception as e:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            QtWidgets.QMessageBox.critical(self, "Error al inspeccionar Excel", str(e))
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+        if not estructura.get("hojas_visibles"):
+            QtWidgets.QMessageBox.warning(
+                self, "Sin hojas visibles",
+                "El archivo seleccionado no contiene hojas de cálculo visibles."
+            )
+            return
+
+        # Abrir modal interactivo de selección de hoja, columnas y mes
+        dialogo_config = ExcelConfigDialog(estructura, parent=self)
+        if dialogo_config.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        config_carga = dialogo_config.obtener_configuracion()
+
+        # Cargar los datos en segundo plano usando la configuración elegida
+        dialogo = LoadingDialog("excel", ruta, config_carga=config_carga, parent=self)
         if dialogo.exec_() == QtWidgets.QDialog.Accepted and dialogo.resultado_filas is not None:
             filas = dialogo.resultado_filas
             self.filas_pago_actual = filas
-            self.label_archivo.setText(ruta.split("/")[-1])
-            self._mostrar_preview(filas)
+            nombre_archivo = ruta.split("/")[-1]
+            mes_txt = f" - {config_carga['mes']}" if config_carga.get("mes") else ""
+            self.label_archivo.setText(f"{nombre_archivo} [{config_carga['hoja']}{mes_txt}]")
+            self._mostrar_preview(filas, columnas_mostrar=config_carga.get("columnas"))
             self.btn_enviar.setEnabled(len(filas) > 0)
+            self.btn_enviar_prueba.setEnabled(len(filas) > 0)
         elif dialogo.error_mensaje:
             QtWidgets.QMessageBox.critical(self, "Error al leer el Excel", dialogo.error_mensaje)
 
@@ -392,6 +454,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.label_archivo.setText("Google Sheets (Cargado)")
             self._mostrar_preview(filas)
             self.btn_enviar.setEnabled(len(filas) > 0)
+            self.btn_enviar_prueba.setEnabled(len(filas) > 0)
         elif dialogo.error_mensaje:
             QtWidgets.QMessageBox.critical(
                 self, "Error al cargar Google Sheets", dialogo.error_mensaje
@@ -438,7 +501,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if state is not None:
             self.tabla_preview.horizontalHeader().restoreState(state)
 
-    def _mostrar_preview(self, filas):
+    def _mostrar_preview(self, filas, columnas_mostrar=None):
         self.tabla_preview.setSortingEnabled(False)
         self.tabla_preview.clear()
         if not filas:
@@ -454,7 +517,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chk_seleccionar_todo.setChecked(True)
         self.chk_seleccionar_todo.blockSignals(False)
 
-        columnas_datos = list(filas[0].keys())
+        if columnas_mostrar:
+            columnas_datos = [c for c in columnas_mostrar if any(c in f or c.strip() in f for f in filas)]
+        else:
+            columnas_datos = [k for k in filas[0].keys() if not k.startswith("_")]
+
         encabezados_completos = ["Enviar"] + columnas_datos
 
         self.tabla_preview.setColumnCount(len(encabezados_completos))
@@ -471,7 +538,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # Columnas 1 en adelante: datos reales de la nómina
             for j, col in enumerate(columnas_datos):
-                val_str = str(fila.get(col, ""))
+                val_str = str(fila.get(col, fila.get(col.strip(), "")))
                 self.tabla_preview.setItem(i, j + 1, QtWidgets.QTableWidgetItem(val_str))
 
         self._restaurar_estado_columnas()
@@ -520,6 +587,77 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.terminado.connect(self._envio_terminado)
 
         self.btn_enviar.setEnabled(False)
+        self.btn_enviar_prueba.setEnabled(False)
+        self.btn_detener.setEnabled(True)
+        self.worker.start()
+
+    def enviar_correo_prueba(self):
+        filas_a_enviar = []
+        for i in range(self.tabla_preview.rowCount()):
+            item_chk = self.tabla_preview.item(i, 0)
+            if item_chk and item_chk.checkState() == QtCore.Qt.Checked:
+                fila_data = item_chk.data(QtCore.Qt.UserRole)
+                if fila_data:
+                    filas_a_enviar.append(fila_data)
+
+        if not filas_a_enviar:
+            fila_cursor = self.tabla_preview.currentRow()
+            if fila_cursor >= 0:
+                item_chk = self.tabla_preview.item(fila_cursor, 0)
+                if item_chk:
+                    fila_data = item_chk.data(QtCore.Qt.UserRole)
+                    if fila_data:
+                        filas_a_enviar.append(fila_data)
+
+        if not filas_a_enviar:
+            QtWidgets.QMessageBox.warning(
+                self, "Sin selección",
+                "Debe seleccionar al menos un registro en la tabla para enviar el correo de prueba."
+            )
+            return
+
+        smtp_config = SettingsController.get_smtp_config()
+        if not smtp_config.get("host") or not smtp_config.get("user") or not smtp_config.get("password"):
+            QtWidgets.QMessageBox.warning(
+                self, "Configuración requerida",
+                "Debe configurar el servidor SMTP en el menú Configuración > Configurar correo SMTP antes de enviar correos."
+            )
+            return
+
+        correo_prueba = (smtp_config.get("correo_pruebas_recepcion") or "").strip()
+        if not correo_prueba:
+            QtWidgets.QMessageBox.warning(
+                self, "Campo no configurado",
+                "Debe configurar el campo 'Correo pruebas recepción' en el menú:\n\n"
+                "Configuración > Configurar correo SMTP."
+            )
+            return
+
+        confirmacion = QtWidgets.QMessageBox.question(
+            self, "Confirmar envío de prueba",
+            f"Se enviará(n) {len(filas_a_enviar)} correo(s) de prueba con la data seleccionada al correo:\n\n"
+            f"'{correo_prueba}'\n\n"
+            "¿Desea continuar?",
+        )
+        if confirmacion != QtWidgets.QMessageBox.Yes:
+            return
+
+        self.texto_log.clear()
+        self.barra_progreso.setValue(0)
+        self.barra_progreso.setMaximum(len(filas_a_enviar))
+
+        self.worker = SendWorker(
+            filas_a_enviar,
+            smtp_config,
+            self.asunto_edit.text(),
+            correo_prueba=correo_prueba
+        )
+        self.worker.progreso.connect(self._actualizar_progreso)
+        self.worker.log.connect(self.texto_log.appendPlainText)
+        self.worker.terminado.connect(self._envio_terminado)
+
+        self.btn_enviar.setEnabled(False)
+        self.btn_enviar_prueba.setEnabled(False)
         self.btn_detener.setEnabled(True)
         self.worker.start()
 
@@ -527,12 +665,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.worker:
             self.worker.detener()
             self.btn_detener.setEnabled(False)
+            self.btn_enviar.setEnabled(True)
+            self.btn_enviar_prueba.setEnabled(True)
 
     def _actualizar_progreso(self, actual, total):
         self.barra_progreso.setValue(actual)
 
     def _envio_terminado(self, ok_count, error_count):
         self.btn_enviar.setEnabled(True)
+        self.btn_enviar_prueba.setEnabled(True)
         self.btn_detener.setEnabled(False)
         QtWidgets.QMessageBox.information(
             self, "Proceso finalizado",

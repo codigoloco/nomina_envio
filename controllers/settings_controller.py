@@ -6,7 +6,9 @@ no acceda directamente al mecanismo de persistencia.
 
 from PyQt5 import QtCore
 
+from models.auditoria_model import registrar_auditoria
 from services.encryption_service import EncryptionService
+from services.smtp_config_service import SmtpConfigService
 
 _ORG = "MiEmpresa"
 _APP = "NominaApp"
@@ -16,6 +18,13 @@ class SettingsController:
 
     @staticmethod
     def get_smtp_config():
+        try:
+            cfg = SmtpConfigService.obtener()
+            if cfg.get("host") or cfg.get("user"):
+                return cfg
+        except Exception:
+            pass
+
         settings = QtCore.QSettings(_ORG, _APP)
         return {
             "host": settings.value("smtp/host", ""),
@@ -24,10 +33,22 @@ class SettingsController:
             "password": settings.value("smtp/password", ""),
             "remitente_nombre": settings.value("smtp/remitente", ""),
             "use_tls": settings.value("smtp/use_tls", "true") == "true",
+            "correo_pruebas_recepcion": settings.value("smtp/correo_pruebas_recepcion", ""),
         }
 
     @staticmethod
-    def save_smtp_config(host, port, user, password, remitente_nombre, use_tls):
+    def save_smtp_config(host, port, user, password, remitente_nombre, use_tls, correo_pruebas_recepcion=""):
+        guardado_bd = False
+        try:
+            SmtpConfigService.guardar(
+                host, port, user, password, remitente_nombre, use_tls,
+                correo_pruebas_recepcion=correo_pruebas_recepcion
+            )
+            guardado_bd = True
+        except Exception:
+            pass
+
+        # Siempre mantenemos respaldo en QSettings local por si no hay conexión
         settings = QtCore.QSettings(_ORG, _APP)
         settings.setValue("smtp/host", host)
         settings.setValue("smtp/port", port or "587")
@@ -35,6 +56,13 @@ class SettingsController:
         settings.setValue("smtp/password", password)
         settings.setValue("smtp/remitente", remitente_nombre)
         settings.setValue("smtp/use_tls", "true" if use_tls else "false")
+        settings.setValue("smtp/correo_pruebas_recepcion", correo_pruebas_recepcion or "")
+
+        registrar_auditoria(
+            "configurar_smtp",
+            entidad="SMTP",
+            detalle=f"host={host}:{port}, remitente={remitente_nombre}, usuario={user}, correo_pruebas={correo_pruebas_recepcion}, centralizado={'si' if guardado_bd else 'local'}"
+        )
 
     @staticmethod
     def obtener_drive_url() -> str:

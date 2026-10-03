@@ -26,6 +26,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.password_edit.setEchoMode(QtWidgets.QLineEdit.Password)
         self.remitente_edit = QtWidgets.QLineEdit()
         self.remitente_edit.setPlaceholderText("Departamento de Nómina")
+        self.correo_pruebas_edit = QtWidgets.QLineEdit()
+        self.correo_pruebas_edit.setPlaceholderText("pruebas@miempresa.com")
         self.tls_check = QtWidgets.QCheckBox("Usar STARTTLS (recomendado con el puerto 587)")
         self.tls_check.setChecked(True)
 
@@ -35,6 +37,7 @@ class SettingsDialog(QtWidgets.QDialog):
         form_smtp.addRow("Usuario / correo:", self.user_edit)
         form_smtp.addRow("Contraseña / clave de app:", self.password_edit)
         form_smtp.addRow("Nombre del remitente:", self.remitente_edit)
+        form_smtp.addRow("Correo pruebas recepción:", self.correo_pruebas_edit)
         form_smtp.addRow(self.tls_check)
 
         # Controles Formato de Moneda
@@ -83,6 +86,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.password_edit.setText(config["password"])
         self.remitente_edit.setText(config["remitente_nombre"])
         self.tls_check.setChecked(config["use_tls"])
+        self.correo_pruebas_edit.setText(config.get("correo_pruebas_recepcion", ""))
 
         # Moneda
         moneda = SettingsController.get_currency_config()
@@ -110,6 +114,7 @@ class SettingsDialog(QtWidgets.QDialog):
             password=self.password_edit.text(),
             remitente_nombre=self.remitente_edit.text().strip(),
             use_tls=self.tls_check.isChecked(),
+            correo_pruebas_recepcion=self.correo_pruebas_edit.text().strip(),
         )
 
         # Moneda

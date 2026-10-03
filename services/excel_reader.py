@@ -119,10 +119,10 @@ def es_totalizador(texto) -> bool:
 class ExcelReader:
 
     @classmethod
-    def extraer_periodo_de_slicer(cls, origen_excel) -> str:
+    def extraer_periodo_de_slicer(cls, origen_excel, nombre_hoja: str = "") -> str:
         """
         Extrae el mes seleccionado en la segmentación de datos (Slicer)
-        'FECHA (mes) 3' correspondiente a la hoja de resumen en el archivo Excel .xlsx.
+        asociada a 'nombre_hoja', o de cualquier slicer de FECHA (mes) disponible.
         Acepta una ruta de archivo (str) o un búfer en memoria (io.BytesIO).
         """
         if isinstance(origen_excel, str) and not origen_excel.lower().endswith(".xlsx"):
@@ -135,38 +135,169 @@ class ExcelReader:
             if isinstance(origen_excel, io.BytesIO):
                 origen_excel.seek(0)
             with zipfile.ZipFile(origen_excel, "r") as z:
-                # 1. Localizar el identificador de cache del slicer 'FECHA (mes) 3'
+                # 1. Intentar buscar el slicer específico de la hoja si se especificó nombre_hoja
                 cache_target = None
-                for name in z.namelist():
-                    if "slicers/slicer" in name.lower():
-                        root = ET.fromstring(z.read(name))
-                        for item in root.iter():
-                            s_name = normalizar_columna(item.attrib.get("name", ""))
-                            if "fecha_(mes)_3" in s_name or "fecha__mes3" in s_name:
-                                cache_target = normalizar_columna(item.attrib.get("cache", ""))
+                if nombre_hoja:
+                    try:
+                        wb_root = ET.fromstring(z.read("xl/workbook.xml"))
+                        rid = None
+                        sheet_norm = normalizar_columna(nombre_hoja)
+                        for s in wb_root.iter():
+                            if s.tag.endswith("sheet"):
+                                n = normalizar_columna(s.attrib.get("name", ""))
+                                if n == sheet_norm or sheet_norm in n:
+                                    for k, v in s.attrib.items():
+                                        if k.endswith("id"):
+                                            rid = v
+                                            break
+                                    if rid:
+                                        break
+
+                        if rid and "xl/_rels/workbook.xml.rels" in z.namelist():
+                            rels_root = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+                            target_sheet = None
+                            for r in rels_root.iter():
+                                if r.attrib.get("Id") == rid:
+                                    target_sheet = r.attrib.get("Target", "")
+                                    break
+
+                            if target_sheet:
+                                sheet_file = target_sheet.split("/")[-1]
+                                rels_sheet_path = f"xl/worksheets/_rels/{sheet_file}.rels"
+                                if rels_sheet_path in z.namelist():
+                                    sheet_rels_root = ET.fromstring(z.read(rels_sheet_path))
+                                    slicer_target = None
+                                    for r in sheet_rels_root.iter():
+                                        t = r.attrib.get("Type", "")
+                                        if "slicer" in t.lower() or "slicer" in r.attrib.get("Target", "").lower():
+                                            slicer_target = r.attrib.get("Target", "")
+                                            break
+                                    if slicer_target:
+                                        slicer_file = slicer_target.split("/")[-1]
+                                        slicer_path = f"xl/slicers/{slicer_file}"
+                                        if slicer_path in z.namelist():
+                                            slicer_root = ET.fromstring(z.read(slicer_path))
+                                            for item in slicer_root.iter():
+                                                if item.attrib.get("cache"):
+                                                    cache_target = normalizar_columna(item.attrib.get("cache"))
+                                                    break
+                    except Exception:
+                        pass
+
+                # 2. Si no se encontró por relación directa de hoja, buscar por nombre o contenido
+                if not cache_target:
+                    for name in z.namelist():
+                        if "slicers/slicer" in name.lower():
+                            root = ET.fromstring(z.read(name))
+                            for item in root.iter():
+                                s_name = normalizar_columna(item.attrib.get("name", ""))
+                                if "fecha" in s_name or "mes" in s_name:
+                                    cache_target = normalizar_columna(item.attrib.get("cache", ""))
+                                    break
+                            if cache_target:
                                 break
-                        if cache_target:
-                            break
 
-                target_cache_norm = cache_target or "segmentaciondedatos_fecha__mes3"
+                # 3. Buscar la selección activa en los archivos slicerCaches
+                if cache_target:
+                    # Intento 1: Coincidencia exacta de cache
+                    for name in z.namelist():
+                        if "slicercaches/" in name.lower():
+                            root = ET.fromstring(z.read(name))
+                            c_name = normalizar_columna(root.attrib.get("name", ""))
+                            if c_name == cache_target:
+                                for sel in root.iter():
+                                    if sel.tag.endswith("selection"):
+                                        val = sel.attrib.get("n", "")
+                                        if "&[" in val:
+                                            mes_raw = val.split("&[")[-1].rstrip("]").strip().lower()
+                                            return mes_raw
 
-                # 2. Buscar la selección activa en el archivo slicerCaches correspondiente
-                for name in z.namelist():
-                    if "slicercaches/" in name.lower():
-                        root = ET.fromstring(z.read(name))
-                        c_name = normalizar_columna(root.attrib.get("name", ""))
-                        if c_name == target_cache_norm or "fecha__mes3" in c_name:
-                            for sel in root.iter():
-                                if sel.tag.endswith("selection"):
-                                    val = sel.attrib.get("n", "")
-                                    if "&[" in val:
-                                        mes_raw = val.split("&[")[-1].rstrip("]").strip().lower()
-                                        return MESES_MAP.get(mes_raw, mes_raw)
+                    # Intento 2: Coincidencia parcial si no hubo exacta
+                    for name in z.namelist():
+                        if "slicercaches/" in name.lower():
+                            root = ET.fromstring(z.read(name))
+                            c_name = normalizar_columna(root.attrib.get("name", ""))
+                            if cache_target in c_name:
+                                for sel in root.iter():
+                                    if sel.tag.endswith("selection"):
+                                        val = sel.attrib.get("n", "")
+                                        if "&[" in val:
+                                            mes_raw = val.split("&[")[-1].rstrip("]").strip().lower()
+                                            return mes_raw
 
         except Exception:
             pass
 
         return ""
+
+    @classmethod
+    def inspeccionar_estructura(cls, origen_excel) -> dict:
+        """
+        Inspecciona el archivo Excel y devuelve un resumen de:
+        - Lista de hojas VISIBLES (omite hojas ocultas).
+        - Para cada hoja visible: columnas disponibles, lista de meses únicos y mes activo en el slicer.
+        """
+        import openpyxl
+
+        if isinstance(origen_excel, str):
+            with open(origen_excel, "rb") as f:
+                contenido_bytes = io.BytesIO(f.read())
+        else:
+            contenido_bytes = origen_excel
+            contenido_bytes.seek(0)
+
+        wb = openpyxl.load_workbook(contenido_bytes, read_only=False, data_only=True)
+        hojas_visibles = [s for s in wb.sheetnames if wb[s].sheet_state == "visible"]
+
+        resultado_hojas = {}
+        for h in hojas_visibles:
+            ws = wb[h]
+            encabezados = []
+            fila_encabezado = None
+
+            # Buscar fila de encabezados en las primeras 20 filas
+            for r in range(1, min(25, ws.max_row + 1)):
+                vals = [str(ws.cell(r, c).value or "").strip() for c in range(1, min(40, ws.max_column + 1))]
+                norm_vals = [normalizar_columna(v) for v in vals if v]
+                if any(k in norm_vals for k in ("encargado", "nombre", "tienda", "total_venta", "neto_a_pagar", "cedula")):
+                    fila_encabezado = r
+                    encabezados = [ws.cell(r, c).value for c in range(1, min(40, ws.max_column + 1))]
+                    break
+
+            cols_limpias = []
+            for c in encabezados:
+                if c is not None and str(c).strip() and str(c).strip() not in cols_limpias:
+                    cols_limpias.append(str(c).strip())
+
+            # Detectar columna de mes
+            meses = []
+            col_mes_idx = None
+            for idx, col in enumerate(encabezados, 1):
+                if col and normalizar_columna(col) in ("fecha_(mes)", "fecha_mes", "mes", "periodo"):
+                    col_mes_idx = idx
+                    break
+
+            if col_mes_idx:
+                for r in range((fila_encabezado or 1) + 1, min((fila_encabezado or 1) + 300, ws.max_row + 1)):
+                    val = ws.cell(r, col_mes_idx).value
+                    if val is not None:
+                        val_s = str(val).strip().lower()
+                        if val_s not in ("fecha (mes)", "mes", "total general", "none", "") and val_s not in meses:
+                            meses.append(val_s)
+
+            # Obtener el mes seleccionado en el slicer de esta hoja
+            mes_slicer = cls.extraer_periodo_de_slicer(contenido_bytes, nombre_hoja=h)
+
+            resultado_hojas[h] = {
+                "columnas": cols_limpias,
+                "meses": meses,
+                "mes_slicer": mes_slicer,
+            }
+
+        return {
+            "hojas_visibles": hojas_visibles,
+            "hojas_info": resultado_hojas,
+        }
 
     @classmethod
     def _procesar_dataframe_pagos(cls, df: pd.DataFrame, periodo_defecto: str = "", omitir_pagos_realizados: bool = False) -> list:
@@ -297,29 +428,196 @@ class ExcelReader:
         return cls._procesar_dataframe_pagos(df)
 
     @classmethod
-    def read_payments(cls, path):
+    def read_payments(cls, path, config_carga: dict = None):
         """
         Método de lectura para archivos Excel (.xlsx, .xls) o CSV locales.
-        Para archivos Excel busca la hoja 'Pago Encargados Resumen' y mantiene
-        la misma estructura que los datos obtenidos de Google Drive.
+        Si se pasa config_carga (dict con 'hoja', 'columnas', 'mes'), procesa
+        exclusivamente la hoja seleccionada, filtrando por el mes indicado y
+        extrayendo las columnas marcadas por el usuario.
         """
+        import os
+        from controllers.settings_controller import SettingsController
+        from models.auditoria_model import registrar_auditoria
+
         ruta_str = str(path).lower()
         if ruta_str.endswith(".csv"):
-            return cls.read_payments_from_csv(path)
+            filas = cls.read_payments_from_csv(path)
+            registrar_auditoria("cargar_excel", entidad=os.path.basename(path), detalle=f"formato=csv, registros={len(filas)}")
+            return filas
 
         # Manejo de archivo Excel (.xlsx / .xls)
-        # Leer el contenido completo a memoria de inmediato para liberar el archivo en disco o red
         with open(path, "rb") as f:
             contenido_bytes = io.BytesIO(f.read())
 
-        # Extraer el período seleccionado en la segmentación de datos (slicer) si existe
+        # Si el usuario especificó una configuración personalizada
+        if config_carga and isinstance(config_carga, dict) and config_carga.get("hoja"):
+            hoja_nombre = config_carga["hoja"]
+            mes_filtro = (config_carga.get("mes") or "").strip().lower()
+            cols_deseadas = config_carga.get("columnas") or []
+            cols_deseadas_norm = {normalizar_columna(c): c for c in cols_deseadas}
+
+            contenido_bytes.seek(0)
+            df = pd.read_excel(contenido_bytes, sheet_name=hoja_nombre, header=None, dtype=str)
+            df = df.fillna("")
+
+            # Localizar fila de encabezados
+            fila_encabezado_idx = None
+            encabezados_raw = []
+            for idx, row in df.iterrows():
+                vals = [str(v).strip() for v in row.values]
+                norm_vals = [normalizar_columna(v) for v in vals if v]
+                if any(k in norm_vals for k in ("encargado", "nombre", "tienda", "cedula", "total_venta", "neto_a_pagar")):
+                    fila_encabezado_idx = idx
+                    encabezados_raw = vals
+                    break
+
+            if fila_encabezado_idx is None:
+                fila_encabezado_idx = 0
+                encabezados_raw = [str(v).strip() for v in df.iloc[0].values]
+
+            # Detectar bloques independientes de columnas (tablas paralelas lado a lado)
+            bloques = []
+            bloque_actual = []
+            for c_idx, c_name in enumerate(encabezados_raw):
+                c_norm = normalizar_columna(c_name)
+                if c_norm in ("encargado", "nombre", "nombre_encargado") and bloque_actual:
+                    bloques.append(bloque_actual)
+                    bloque_actual = []
+                if c_name.strip():
+                    bloque_actual.append((c_idx, c_name.strip()))
+            if bloque_actual:
+                bloques.append(bloque_actual)
+
+            if not bloques:
+                bloques = [[(i, c) for i, c in enumerate(encabezados_raw) if c.strip()]]
+
+            # Importar modelo para resolución de cédulas
+            from models.employee_model import EmployeeModel
+
+            filas_resultado = []
+
+            for bloque in bloques:
+                mapa_col_bloque = {normalizar_columna(name): c_idx for c_idx, name in bloque}
+
+                # Detectar índice de columna de mes para este bloque
+                col_mes_idx = None
+                for c_idx, name in bloque:
+                    if normalizar_columna(name) in ("fecha_(mes)", "fecha_mes", "mes", "periodo"):
+                        col_mes_idx = c_idx
+                        break
+
+                for idx in range(fila_encabezado_idx + 1, len(df)):
+                    vals = [str(v).strip() for v in df.iloc[idx].values]
+                    if not any(vals):
+                        continue
+
+                    # Obtener nombre en este bloque
+                    col_nombre_idx = None
+                    for k in ("encargado", "nombre", "nombre_del_encargado", "nombre_encargado"):
+                        if k in mapa_col_bloque:
+                            col_nombre_idx = mapa_col_bloque[k]
+                            break
+
+                    if col_nombre_idx is None or col_nombre_idx >= len(vals):
+                        continue
+
+                    nombre_val = vals[col_nombre_idx]
+                    if not nombre_val or es_totalizador(nombre_val) or nombre_val.lower() in ("(en blanco)", "total general", "encargado", "none", "nan"):
+                        continue
+
+                    # Filtrar por mes si aplica
+                    if mes_filtro and col_mes_idx is not None and col_mes_idx < len(vals):
+                        mes_fila = vals[col_mes_idx].lower().strip()
+                        mes_norm = MESES_MAP.get(mes_fila, mes_fila)
+                        mes_filtro_norm = MESES_MAP.get(mes_filtro, mes_filtro)
+                        if mes_norm != mes_filtro_norm and mes_fila != mes_filtro:
+                            continue
+
+                    # Determinar cédula: si viene en el bloque usarla, sino buscar en BD
+                    cedula_val = ""
+                    for k in ALIAS_CEDULA:
+                        if k in mapa_col_bloque:
+                            c_i = mapa_col_bloque[k]
+                            if c_i < len(vals) and vals[c_i]:
+                                cedula_val = limpiar_cedula(vals[c_i])
+                                break
+
+                    if not cedula_val or cedula_val == "N/A":
+                        try:
+                            emp_bd = EmployeeModel.get_by_nombre(nombre_val)
+                            if emp_bd and emp_bd.get("cedula"):
+                                cedula_val = emp_bd["cedula"]
+                            else:
+                                cedula_val = "N/A"
+                        except Exception:
+                            cedula_val = "N/A"
+
+                    # Extraer unidad administrativa / tienda
+                    tienda_val = ""
+                    for k in ("tienda", "unidad_administrativa"):
+                        if k in mapa_col_bloque:
+                            c_i = mapa_col_bloque[k]
+                            if c_i < len(vals):
+                                tienda_val = vals[c_i]
+                                break
+
+                    fila_procesada = {}
+                    # Extraer columnas deseadas por el usuario
+                    for col_orig in cols_deseadas:
+                        c_norm = normalizar_columna(col_orig)
+                        val_orig = ""
+                        if c_norm in mapa_col_bloque:
+                            c_i = mapa_col_bloque[c_norm]
+                            if c_i < len(vals):
+                                val_orig = vals[c_i]
+
+                        # Formatear montos numéricos conocidos
+                        if c_norm in ("total_venta", "gastos_deducibles", "neto_a_pagar", "vales", "monto_comision_encargado", "sueldo_encargado", "bonificacion_mensual", "monto_pagado", "neto_para_comisiones"):
+                            val_final = SettingsController.format_amount(val_orig) if val_orig and val_orig != "N/A" else (val_orig or "N/A")
+                        elif c_norm in ("encargado", "nombre"):
+                            val_final = nombre_val
+                        elif c_norm in ALIAS_CEDULA:
+                            val_final = cedula_val
+                        elif c_norm in ("fecha_(mes)", "fecha_mes", "mes", "periodo"):
+                            val_final = mes_filtro or val_orig or "N/A"
+                        elif c_norm in ("tienda", "unidad_administrativa"):
+                            val_final = tienda_val or "N/A"
+                        else:
+                            val_final = val_orig if val_orig else "N/A"
+
+                        # Guardar con el nombre original visual seleccionado
+                        fila_procesada[col_orig.strip()] = val_final
+                        # Guardar también con la clave estandarizada si difiere para compatibilidad
+                        clave_std = ENCARGADOS_COLUMN_MAP.get(c_norm)
+                        if clave_std and clave_std not in fila_procesada:
+                            fila_procesada[clave_std] = val_final
+
+                    # Asegurar presencia de campos base requeridos por el sistema
+                    if "nombre" not in fila_procesada:
+                        fila_procesada["nombre"] = nombre_val
+                    if "cedula" not in fila_procesada:
+                        fila_procesada["cedula"] = cedula_val
+                    if "periodo" not in fila_procesada:
+                        fila_procesada["periodo"] = mes_filtro or "N/A"
+                    if "unidad_administrativa" not in fila_procesada and tienda_val:
+                        fila_procesada["unidad_administrativa"] = tienda_val
+
+                    filas_resultado.append(fila_procesada)
+
+            registrar_auditoria(
+                "cargar_excel",
+                entidad=os.path.basename(path),
+                detalle=f"hoja={hoja_nombre}, mes={mes_filtro or 'todos'}, columnas={len(cols_deseadas)}, registros={len(filas_resultado)}"
+            )
+            return filas_resultado
+
+        # Modo por defecto sin config_carga (hoja de resumen o primera disponible)
         periodo_slicer = cls.extraer_periodo_de_slicer(contenido_bytes) if ruta_str.endswith(".xlsx") else ""
 
         contenido_bytes.seek(0)
         with pd.ExcelFile(contenido_bytes, engine="openpyxl" if ruta_str.endswith(".xlsx") else None) as excel_file:
             nombres_hojas = excel_file.sheet_names
 
-            # Búsqueda de la hoja ignorando mayúsculas/minúsculas y tildes/espacios
             hoja_objetivo = None
             busqueda_normalizada = normalizar_columna(HOJA_EXCEL_PAGO_RESUMEN)
 
@@ -328,7 +626,6 @@ class ExcelReader:
                     hoja_objetivo = hoja
                     break
 
-            # Búsqueda por palabras clave si no hubo coincidencia exacta normalizada
             if not hoja_objetivo:
                 for hoja in nombres_hojas:
                     norm_h = normalizar_columna(hoja)
@@ -336,7 +633,6 @@ class ExcelReader:
                         hoja_objetivo = hoja
                         break
 
-            # Si aún no coincide, usar la única hoja disponible o lanzar excepción clara
             if not hoja_objetivo:
                 if len(nombres_hojas) == 1:
                     hoja_objetivo = nombres_hojas[0]
@@ -349,7 +645,13 @@ class ExcelReader:
             df = pd.read_excel(excel_file, sheet_name=hoja_objetivo, header=None, dtype=str)
 
         df = df.fillna("")
-        return cls._procesar_dataframe_pagos(df, periodo_defecto=periodo_slicer, omitir_pagos_realizados=True)
+        filas = cls._procesar_dataframe_pagos(df, periodo_defecto=periodo_slicer, omitir_pagos_realizados=True)
+        registrar_auditoria(
+            "cargar_excel",
+            entidad=os.path.basename(path),
+            detalle=f"hoja={hoja_objetivo}, periodo={periodo_slicer}, registros={len(filas)}"
+        )
+        return filas
 
     @classmethod
     def read_employees_template(cls, path):
