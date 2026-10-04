@@ -479,14 +479,26 @@ class ExcelReader:
             bloques = []
             bloque_actual = []
             for c_idx, c_name in enumerate(encabezados_raw):
-                c_norm = normalizar_columna(c_name)
-                if c_norm in ("encargado", "nombre", "nombre_encargado") and bloque_actual:
+                nombre_limpio = str(c_name or "").strip()
+                if not nombre_limpio or nombre_limpio.lower() in ("nan", "none", "unnamed"):
+                    if bloque_actual:
+                        bloques.append(bloque_actual)
+                        bloque_actual = []
+                    continue
+
+                c_norm = normalizar_columna(nombre_limpio)
+                ya_tiene_nombre = any(normalizar_columna(x[1]) in ("encargado", "nombre", "nombre_encargado") for x in bloque_actual)
+                if c_norm in ("encargado", "nombre", "nombre_encargado") and ya_tiene_nombre:
                     bloques.append(bloque_actual)
                     bloque_actual = []
-                if c_name.strip():
-                    bloque_actual.append((c_idx, c_name.strip()))
+
+                bloque_actual.append((c_idx, nombre_limpio))
+
             if bloque_actual:
                 bloques.append(bloque_actual)
+
+            # Filtrar bloques con al menos 2 columnas para descartar columnas aisladas
+            bloques = [b for b in bloques if len(b) >= 2]
 
             if not bloques:
                 bloques = [[(i, c) for i, c in enumerate(encabezados_raw) if c.strip()]]
