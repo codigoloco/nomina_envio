@@ -107,3 +107,13 @@ class EmployeeModel:
         finally:
             conn.close()
 
+    @staticmethod
+    def obtener_cedulas_registradas() -> set:
+        """Devuelve un conjunto (set) con todas las cédulas limpias registradas en la base de datos."""
+        conn = get_connection()
+        try:
+            rows = conn.execute("SELECT cedula FROM empleados").fetchall()
+            return {str(r["cedula"]).strip() for r in rows if r and r["cedula"]}
+        finally:
+            conn.close()
+

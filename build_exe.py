@@ -27,6 +27,27 @@ def verificar_e_instalar_pyinstaller():
             sys.exit(1)
 
 
+def limpiar_cache_proyecto():
+    """Elimina recursivamente todas las carpetas __pycache__ y archivos .pyc del proyecto (excepto .venv)."""
+    print("Limpiando caché de bytecode Python (__pycache__ y *.pyc)...")
+    for raiz, directorios, archivos in os.walk(BASE_DIR):
+        if ".venv" in raiz or ".git" in raiz:
+            continue
+        for d in directorios:
+            if d == "__pycache__":
+                ruta_dir = os.path.join(raiz, d)
+                try:
+                    shutil.rmtree(ruta_dir, ignore_errors=True)
+                except Exception:
+                    pass
+        for a in archivos:
+            if a.endswith((".pyc", ".pyo")):
+                try:
+                    os.remove(os.path.join(raiz, a))
+                except Exception:
+                    pass
+
+
 def preparar_directorios_trabajo():
     """Limpia y recrea las carpetas build/main y dist necesarias para PyInstaller."""
     for carpeta in ["build", "dist"]:
@@ -49,7 +70,7 @@ def compilar():
         print(f"Error: No se encontró el archivo {spec_path}")
         sys.exit(1)
 
-    print("Iniciando proceso de compilación con PyInstaller...")
+    print("Iniciando proceso de compilación limpia con PyInstaller...")
 
     try:
         import PyInstaller.__main__
@@ -57,6 +78,7 @@ def compilar():
         PyInstaller.__main__.run([
             spec_path,
             "--noconfirm",
+            "--clean",
         ])
 
         dist_path = os.path.join(BASE_DIR, "dist", "NominaApp")
@@ -76,5 +98,6 @@ def compilar():
 
 if __name__ == "__main__":
     verificar_e_instalar_pyinstaller()
+    limpiar_cache_proyecto()
     preparar_directorios_trabajo()
     compilar()

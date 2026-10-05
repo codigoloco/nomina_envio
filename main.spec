@@ -4,8 +4,9 @@ import os
 
 block_cipher = None
 
-# Archivos adicionales a incluir en la compilación
+# Archivos y carpetas adicionales a incluir en la compilación
 added_files = [
+    ('migraciones', 'migraciones'),
     ('plantilla_pagos_ejemplo.xlsx', '.'),
 ]
 
@@ -15,19 +16,37 @@ a = Analysis(
     binaries=[],
     datas=added_files,
     hiddenimports=[
+        # GUI PyQt5
         'PyQt5',
         'PyQt5.QtCore',
         'PyQt5.QtWidgets',
         'PyQt5.QtGui',
         'PyQt5.sip',
 
+        # Procesamiento de datos y Excel
         'pandas',
         'openpyxl',
+
+        # Conexiones a bases de datos
         'sqlite3',
+        'pyodbc',
+        'pymysql',
+        'psycopg2',
+
+        # Envío de correos SMTP
         'smtplib',
         'email',
         'email.mime.multipart',
         'email.mime.text',
+
+        # Migraciones dinámicas
+        'migraciones',
+        'migraciones.2026_10_03_184000_crear_tabla_migraciones',
+        'migraciones.2026_10_03_184100_crear_tabla_empleados',
+        'migraciones.2026_10_03_184200_crear_tabla_envios',
+        'migraciones.2026_10_03_184300_crear_tabla_configuraciones',
+        'migraciones.2026_10_03_184400_crear_tabla_auditoria',
+        'migraciones.2026_10_03_184500_crear_tabla_config_carga_excel',
     ],
     hookspath=[],
     hooksconfig={},

@@ -22,6 +22,7 @@ from views.excel_config_dialog import ExcelConfigDialog
 from views.settings_dialog import SettingsDialog
 from views.google_drive_dialog import GoogleDriveDialog
 from views.loading_dialog import LoadingDialog
+from views.unregistered_employees_dialog import UnregisteredEmployeesDialog
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -427,8 +428,28 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mostrar_preview(filas, columnas_mostrar=config_carga.get("columnas"))
             self.btn_enviar.setEnabled(len(filas) > 0)
             self.btn_enviar_prueba.setEnabled(len(filas) > 0)
+
+            # Alertar si hay empleados en el Excel que no están en la BD
+            self._verificar_empleados_no_registrados(filas, nombre_origen=nombre_archivo)
         elif dialogo.error_mensaje:
             QtWidgets.QMessageBox.critical(self, "Error al leer el Excel", dialogo.error_mensaje)
+
+    def _verificar_empleados_no_registrados(self, filas: list, nombre_origen: str = "Excel"):
+        """Detecta si hay empleados en las filas leídas con cédula que no están en la BD y muestra alerta."""
+        try:
+            no_registrados = EmployeeController.detectar_no_registrados(filas)
+            if no_registrados:
+                from models.auditoria_model import registrar_auditoria
+                registrar_auditoria(
+                    "alerta_empleados_no_registrados",
+                    entidad=nombre_origen,
+                    detalle=f"total_filas={len(filas)}, faltantes={len(no_registrados)}"
+                )
+                dialogo_alerta = UnregisteredEmployeesDialog(no_registrados, parent=self)
+                dialogo_alerta.exec_()
+        except Exception as e:
+            # Nunca bloquear el flujo principal si ocurre un error en la verificación
+            print(f"Error al verificar empleados no registrados: {e}")
 
     def cargar_desde_drive(self):
         url_guardada = SettingsController.obtener_drive_url()
@@ -455,6 +476,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mostrar_preview(filas)
             self.btn_enviar.setEnabled(len(filas) > 0)
             self.btn_enviar_prueba.setEnabled(len(filas) > 0)
+
+            # Alertar si hay empleados en la hoja que no están en la BD
+            self._verificar_empleados_no_registrados(filas, nombre_origen="Google Sheets")
         elif dialogo.error_mensaje:
             QtWidgets.QMessageBox.critical(
                 self, "Error al cargar Google Sheets", dialogo.error_mensaje

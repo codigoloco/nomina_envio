@@ -22,13 +22,16 @@ class SqlServerDriver(DriverBase):
 
     @classmethod
     def listar_controladores(cls) -> list:
-        """Devuelve los drivers ODBC de SQL Server instalados en Windows ordenados por modernidad."""
+        """Devuelve los drivers ODBC de SQL Server instalados en Windows ordenados por modernidad y compatibilidad."""
         try:
             import pyodbc
-            instalados = [d for d in pyodbc.drivers() if "SQL Server" in d]
+            todos = pyodbc.drivers()
+            # Excluir controladores de réplica móvil o dañados (RDA)
+            instalados = [d for d in todos if "sql server" in d.lower() and "rda" not in d.lower()]
             modernos = sorted((d for d in instalados if d.startswith("ODBC Driver")), reverse=True)
-            otros = [d for d in instalados if not d.startswith("ODBC Driver")]
-            return modernos + otros
+            clasico = [d for d in instalados if d == "SQL Server"]
+            otros = [d for d in instalados if not d.startswith("ODBC Driver") and d != "SQL Server"]
+            return modernos + clasico + otros
         except Exception:
             return []
 
@@ -42,6 +45,50 @@ class SqlServerDriver(DriverBase):
             "Falta la librería 'pyodbc' o no hay controladores ODBC de SQL Server instalados en Windows."
         )
 
+    def _construir_parametro_servidor(self, host: str, puerto: str = "", omitir_puerto: bool = False) -> str:
+        """
+        Construye el valor para SERVER en la cadena ODBC.
+        Soporta IP (ej: 192.168.1.50) con puerto TCP, y nombres de equipo
+        (ej: SRV-APP, localhost, ., SRV-APP\\SQLEXPRESS) sin forzar puerto
+        para permitir memoria compartida y Named Pipes como usa Profit Plus.
+        """
+        import re
+        host_limpio = str(host or "").strip()
+        puerto_limpio = str(puerto or "").strip()
+
+        if not host_limpio:
+            return "localhost"
+
+        if "," in host_limpio:
+            return host_limpio
+
+        if omitir_puerto:
+            return host_limpio
+
+        es_ip = bool(re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", host_limpio))
+        if es_ip:
+            pto = puerto_limpio if puerto_limpio else str(self.puerto_defecto)
+            return f"{host_limpio},{pto}"
+
+        if puerto_limpio and puerto_limpio != str(self.puerto_defecto):
+            return f"{host_limpio},{puerto_limpio}"
+
+        return host_limpio
+
+    def _armar_cadena(self, config: dict, driver_odbc: str, base_datos: str, omitir_puerto: bool = False) -> str:
+        host = config.get("host", "")
+        puerto = config.get("puerto", "")
+        servidor = self._construir_parametro_servidor(host, puerto, omitir_puerto=omitir_puerto)
+
+        return (
+            f"DRIVER={{{driver_odbc}}};"
+            f"SERVER={servidor};"
+            f"DATABASE={_escapar_valor_odbc(base_datos)};"
+            f"UID={_escapar_valor_odbc(config.get('usuario', ''))};"
+            f"PWD={_escapar_valor_odbc(config.get('password', ''))};"
+            "TrustServerCertificate=yes;"
+        )
+
     def abrir(self, config: dict):
         try:
             import pyodbc
@@ -51,16 +98,15 @@ class SqlServerDriver(DriverBase):
             )
 
         driver_odbc = self._resolver_driver_odbc(config.get("driver_odbc"))
-        puerto = int(config.get("puerto") or self.puerto_defecto)
-        cadena = (
-            f"DRIVER={{{driver_odbc}}};"
-            f"SERVER={config.get('host', '')},{puerto};"
-            f"DATABASE={_escapar_valor_odbc(config.get('base_datos', ''))};"
-            f"UID={_escapar_valor_odbc(config.get('usuario', ''))};"
-            f"PWD={_escapar_valor_odbc(config.get('password', ''))};"
-            "TrustServerCertificate=yes;"
-        )
-        return pyodbc.connect(cadena, timeout=6)
+        cadena = self._armar_cadena(config, driver_odbc, config.get("base_datos", ""), omitir_puerto=False)
+        try:
+            return pyodbc.connect(cadena, timeout=6)
+        except pyodbc.Error as e:
+            # Si falló por timeout de red TCP (error 08001 / 258) y se usó puerto, reintentar sin puerto para usar memoria compartida / Named Pipes
+            if "08001" in str(e) and "," in cadena:
+                cadena_sin_puerto = self._armar_cadena(config, driver_odbc, config.get("base_datos", ""), omitir_puerto=True)
+                return pyodbc.connect(cadena_sin_puerto, timeout=6)
+            raise
 
     def probar(self, config: dict):
         """
@@ -75,16 +121,16 @@ class SqlServerDriver(DriverBase):
         try:
             import pyodbc
             driver_odbc = self._resolver_driver_odbc(config.get("driver_odbc"))
-            puerto = int(config.get("puerto") or self.puerto_defecto)
-            cadena_master = (
-                f"DRIVER={{{driver_odbc}}};"
-                f"SERVER={config.get('host', '')},{puerto};"
-                f"DATABASE=master;"
-                f"UID={_escapar_valor_odbc(config.get('usuario', ''))};"
-                f"PWD={_escapar_valor_odbc(config.get('password', ''))};"
-                "TrustServerCertificate=yes;"
-            )
-            conexion_master = pyodbc.connect(cadena_master, timeout=6)
+            cadena_master = self._armar_cadena(config, driver_odbc, "master", omitir_puerto=False)
+            try:
+                conexion_master = pyodbc.connect(cadena_master, timeout=6)
+            except pyodbc.Error as e:
+                if "08001" in str(e) and "," in cadena_master:
+                    cadena_master_sin = self._armar_cadena(config, driver_odbc, "master", omitir_puerto=True)
+                    conexion_master = pyodbc.connect(cadena_master_sin, timeout=6)
+                else:
+                    raise
+
             cur = conexion_master.cursor()
             bd_nombre = config.get("base_datos", "").strip()
             cur.execute("SELECT name FROM sys.databases WHERE name = ?", (bd_nombre,))

@@ -51,11 +51,12 @@ class DatabaseDialog(QtWidgets.QDialog):
         self.lbl_controlador_odbc = QtWidgets.QLabel("Controlador ODBC:")
         self.controlador_odbc_combo = QtWidgets.QComboBox()
 
-        self.lbl_host = QtWidgets.QLabel("Servidor (host):")
+        self.lbl_host = QtWidgets.QLabel("Servidor (IP o nombre de equipo):")
         self.host_edit = QtWidgets.QLineEdit()
-        self.host_edit.setPlaceholderText("localhost")
+        self.host_edit.setPlaceholderText("Ej: SRV-APP, 192.168.1.50, localhost o .")
         self.lbl_puerto = QtWidgets.QLabel("Puerto:")
         self.puerto_edit = QtWidgets.QLineEdit()
+        self.puerto_edit.setPlaceholderText("Opcional si es nombre de equipo")
         self.puerto_edit.setValidator(QtGui.QIntValidator(0, 65535, self))
 
         self.etiqueta_base = QtWidgets.QLabel("Base de datos:")
